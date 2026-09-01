@@ -148,6 +148,7 @@ var dataImportCmd = &cobra.Command{
 func init() {
 	dataCreateCmd.Flags().StringVar(&dataEngine, "engine", "mysql@8.0", "engine spec <engine>@<version|series>")
 	dataImportCmd.Flags().StringArrayVar(&dataSQLFiles, "sql", nil, "SQL file to import (repeatable)")
+	dataCmd.GroupID = "project"
 	dataCmd.AddCommand(dataLsCmd, dataCreateCmd, dataRmCmd, dataImportCmd)
 	rootCmd.AddCommand(dataCmd)
 }

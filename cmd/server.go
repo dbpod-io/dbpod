@@ -232,12 +232,23 @@ func init() {
 	serverStartCmd.Flags().IntVar(&serverPort, "port", 3306, "TCP port")
 	serverLogsCmd.Flags().BoolVarP(&followLogs, "follow", "f", false, "follow log output")
 
+	serverCmd.GroupID = "project"
 	serverCmd.AddCommand(serverLsCmd, serverStartCmd, serverStopCmd, serverRestartCmd, serverRmCmd, serverLogsCmd)
 	rootCmd.AddCommand(serverCmd)
 
 	rootCmd.AddCommand(&cobra.Command{
-		Use:   "ps",
-		Short: "List servers of the current project (alias of: dbpod server ls)",
+		Use:     "version",
+		Short:   "Print the dbpod version",
+		GroupID: "global",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Fprintf(cmd.OutOrStdout(), "dbpod version %s\n", Version)
+		},
+	})
+
+	rootCmd.AddCommand(&cobra.Command{
+		Use:     "ps",
+		Short:   "List servers of the current project (alias of: dbpod server ls)",
+		GroupID: "project",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return printServers()
 		},

@@ -129,6 +129,38 @@ func Remove(engine, version string) error {
 	return os.RemoveAll(base)
 }
 
+// Path returns the installation directory of an installed distribution
+// ("" when not installed).
+func Path(engine, version string) string {
+	r, err := root(engine, version)
+	if err != nil {
+		return ""
+	}
+	return r
+}
+
+// Size returns the on-disk size in bytes of an installed distribution
+// (0 when not installed).
+func Size(engine, version string) int64 {
+	base, err := imageRoot(engine, version)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	_ = filepath.WalkDir(base, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			if info, err := d.Info(); err == nil {
+				total += info.Size()
+			}
+		}
+		return nil
+	})
+	return total
+}
+
 // Install downloads (via mirror when non-empty) and extracts engine@version.
 // Series versions like "8.0" resolve to the latest known patch release.
 func Install(ref PackageRef, mirror string, stdout io.Writer) error {

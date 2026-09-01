@@ -6,6 +6,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Version is the dbpod release version.
+const Version = "0.1.0"
+
 var mirror string
 
 var rootCmd = &cobra.Command{
@@ -29,5 +32,15 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.AddGroup(
+		&cobra.Group{
+			ID:    "project",
+			Title: "Project Commands (operate on the current project's ./.dbpod)",
+		},
+		&cobra.Group{
+			ID:    "global",
+			Title: "Global Commands",
+		},
+	)
 	rootCmd.PersistentFlags().StringVar(&mirror, "mirror", "", "mirror base URL replacing the official download host (e.g. https://mirrors.example.com/mysql)")
 }

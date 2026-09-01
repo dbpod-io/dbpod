@@ -208,6 +208,7 @@ var projectCmds = []*cobra.Command{
 
 func init() {
 	for _, c := range projectCmds {
+		c.GroupID = "project"
 		if c.Name() == "init" {
 			c.Flags().StringVar(&initEngine, "engine", "mysql@8.0", "engine spec <engine>@<version|series>")
 			c.Flags().IntVar(&initPort, "port", 3306, "server port")
