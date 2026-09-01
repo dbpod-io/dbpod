@@ -1,0 +1,17 @@
+# built binaries
+/dbpod
+/dbpod.exe
+/cmd/metadata-gen/metadata-gen
+
+# test & coverage artifacts
+*.test
+*.out
+
+# release/build output
+/dist/
+
+# dbpod project-local state (created when testing the tool in this repo)
+/.dbpod/
+
+# OS / editors
+.DS_Store
