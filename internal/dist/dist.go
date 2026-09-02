@@ -139,6 +139,13 @@ func Path(engine, version string) string {
 	return r
 }
 
+// HasBinary reports whether the named binary exists in an installed
+// distribution.
+func HasBinary(engine, version, bin string) bool {
+	_, err := BinaryPath(engine, version, bin)
+	return err == nil
+}
+
 // Size returns the on-disk size in bytes of an installed distribution
 // (0 when not installed).
 func Size(engine, version string) int64 {
@@ -188,6 +195,12 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "downloading %s\n", url)
 
 	archive, err := download(url, pkg.MD5, pkg.Size, stdout)
+	if err != nil && pkg.FallbackURL != "" && pkg.FallbackURL != url {
+		// old releases vanish from the GA CDN but stay on the archives
+		// endpoints — retry with the recorded fallback
+		fmt.Fprintf(stdout, "primary failed (%v); trying fallback %s\n", err, pkg.FallbackURL)
+		archive, err = download(pkg.FallbackURL, pkg.MD5, 0, stdout) // fallback size unknown
+	}
 	if err != nil {
 		return err
 	}
@@ -232,7 +245,8 @@ func clearQuarantine(base string) error {
 	return exec.Command("xattr", "-rd", "com.apple.quarantine", base).Run()
 }
 
-// download fetches url to a temp file, verifying size and MD5 when known.
+// download fetches url to a temp file, verifying MD5 when known. Page-listed
+// sizes are display-rounded and only used for progress display.
 func download(url, md5sum string, size int64, stdout io.Writer) (string, error) {
 	tmp, err := os.CreateTemp("", "dbpod-download-*")
 	if err != nil {

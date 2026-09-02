@@ -40,6 +40,19 @@ func VersionsDir() (string, error) {
 	return filepath.Join(h, "versions"), nil
 }
 
+// InstancesDir returns the global directory holding instance datadirs
+// (DBPOD_INSTANCES_DIR overrides the default <DBPOD_HOME>/instances).
+func InstancesDir() (string, error) {
+	if d := os.Getenv("DBPOD_INSTANCES_DIR"); d != "" {
+		return d, nil
+	}
+	h, err := HomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, "instances"), nil
+}
+
 // MetadataDir returns the global directory for downloaded metadata caches.
 func MetadataDir() (string, error) {
 	h, err := HomeDir()
@@ -47,6 +60,16 @@ func MetadataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(h, "metadata"), nil
+}
+
+// TemplatesDir returns the global directory for user-customizable config
+// templates (seeded from the embedded defaults on first use).
+func TemplatesDir() (string, error) {
+	h, err := HomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, "templates"), nil
 }
 
 // ImageDir returns the extracted engine directory for engine@version.
@@ -65,24 +88,6 @@ func DataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(d, "data"), nil
-}
-
-// ServicesDir returns the project-local services metadata directory.
-func ServicesDir() (string, error) {
-	d, err := DBPodDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, "services"), nil
-}
-
-// ServiceStatePath returns the metadata file path of a named service.
-func ServiceStatePath(name string) (string, error) {
-	s, err := ServicesDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(s, name+".json"), nil
 }
 
 // LogsDir returns the project-local logs directory.

@@ -9,7 +9,7 @@ import (
 // states. It mirrors the real shape: classic series (5.7...9.7), calendar
 // innovation releases (26.7.0) and LTS releases.
 func fixture() []lsEntry {
-	return []lsEntry{
+	entries := []lsEntry{
 		{Version: "26.7.0"},            // calendar, non-LTS (innovation)
 		{Version: "9.7.2", LTS: true},  // LTS
 		{Version: "9.7.1"},             // non-LTS
@@ -19,6 +19,24 @@ func fixture() []lsEntry {
 		{Version: "8.0.40"},            // non-LTS
 		{Version: "5.7.44"},            // non-LTS
 	}
+	for i := range entries {
+		entries[i].Available = true
+	}
+	return entries
+}
+
+// markUnavailable mocks versions without a package for the current platform.
+func markUnavailable(entries []lsEntry, versions ...string) []lsEntry {
+	set := map[string]bool{}
+	for _, v := range versions {
+		set[v] = true
+	}
+	for i := range entries {
+		if set[entries[i].Version] {
+			entries[i].Available = false
+		}
+	}
+	return entries
 }
 
 func labels(rows []lsRow) []string {
@@ -43,9 +61,9 @@ func withInstalled(t *testing.T, versions ...string) []lsEntry {
 	return entries
 }
 
-func TestEngineLsDefaultInstalledBranch(t *testing.T) {
-	// 8.0.46 installed and equal to branch latest: dedup keeps only the
-	// branch entry — the plain version row must NOT appear
+func TestEngineLsDefaultInstalledSeries(t *testing.T) {
+	// 8.0.46 installed and equal to the series latest: dedup keeps only the
+	// series entry — the plain version row must NOT appear
 	entries := withInstalled(t, "8.0.46")
 	rows := buildLsRows(entries, true, false, false, true)
 
@@ -61,13 +79,13 @@ func TestEngineLsDefaultInstalledBranch(t *testing.T) {
 	}
 	for _, r := range rows {
 		if r.Label == "8.0 (8.0.46)" && !r.Installed {
-			t.Error("8.0 branch should carry installed state of its latest")
+			t.Error("8.0 series should carry installed state of its latest")
 		}
 	}
 }
 
-func TestEngineLsInstalledNotBranchLatest(t *testing.T) {
-	// 8.0.40 installed but the 8.0 branch latest is 8.0.46: the branch
+func TestEngineLsInstalledNotSeriesLatest(t *testing.T) {
+	// 8.0.40 installed but the 8.0 series latest is 8.0.46: the series
 	// stands for 8.0.46 (not installed) and 8.0.40 appears as its own row
 	entries := withInstalled(t, "8.0.40")
 	rows := buildLsRows(entries, true, false, false, true)
@@ -87,7 +105,7 @@ func TestEngineLsInstalledNotBranchLatest(t *testing.T) {
 		switch r.Label {
 		case "8.0 (8.0.46)":
 			if r.Installed {
-				t.Error("8.0 branch must not be installed: its latest 8.0.46 is not")
+				t.Error("8.0 series must not be installed: its latest 8.0.46 is not")
 			}
 		case "8.0.40":
 			if !r.Installed {
@@ -145,7 +163,7 @@ func TestEngineLsUnionInstalledLts(t *testing.T) {
 	}
 }
 
-func TestEngineLsBranchOnly(t *testing.T) {
+func TestEngineLsSeriesOnly(t *testing.T) {
 	rows := buildLsRows(fixture(), false, false, false, true)
 	want := []string{
 		"innovation (26.7.0)",
@@ -157,7 +175,7 @@ func TestEngineLsBranchOnly(t *testing.T) {
 	if !reflect.DeepEqual(labels(rows), want) {
 		t.Fatalf("rows = %v, want %v", labels(rows), want)
 	}
-	// branch rows are never "installed" unless their latest is
+	// series rows are never "installed" unless their latest is
 	for _, r := range rows {
 		if r.Installed {
 			t.Errorf("%s should not be installed (nothing mocked)", r.Label)
@@ -165,17 +183,17 @@ func TestEngineLsBranchOnly(t *testing.T) {
 	}
 }
 
-func TestEngineLsCalendarBranching(t *testing.T) {
+func TestEngineLsCalendarSeries(t *testing.T) {
 	entries := []lsEntry{
 		{Version: "27.1.0"},             // calendar non-LTS -> innovation
 		{Version: "26.7.0"},             // calendar non-LTS -> innovation
-		{Version: "26.10.1", LTS: true}, // calendar LTS -> own branch
+		{Version: "26.10.1", LTS: true}, // calendar LTS -> own series
 		{Version: "8.0.46"},             // classic
 	}
 	rows := buildLsRows(entries, false, false, false, true)
 	want := []string{
 		"innovation (27.1.0)", // collapses ALL non-LTS calendar, latest wins
-		"26.10 (26.10.1)",     // calendar LTS keeps its own branch
+		"26.10 (26.10.1)",     // calendar LTS keeps its own series
 		"8.0 (8.0.46)",
 	}
 	if !reflect.DeepEqual(labels(rows), want) {
@@ -189,8 +207,8 @@ func TestEngineLsCalendarBranching(t *testing.T) {
 	}
 }
 
-func TestEngineLsDedupPrefersBranch(t *testing.T) {
-	// a version equal to a branch latest is listed once, as the branch,
+func TestEngineLsDedupPrefersSeries(t *testing.T) {
+	// a version equal to a series latest is listed once, as the series,
 	// regardless of which filter matched it (8.4.11 is LTS and installed)
 	entries := withInstalled(t, "8.4.11")
 	rows := buildLsRows(entries, true, false, true, true)
@@ -199,7 +217,7 @@ func TestEngineLsDedupPrefersBranch(t *testing.T) {
 	want := []string{
 		"innovation (26.7.0)",
 		"9.7 (9.7.2)",
-		"8.4 (8.4.11)", // branch wins over the plain 8.4.11 version row
+		"8.4 (8.4.11)", // series wins over the plain 8.4.11 version row
 		"8.0 (8.0.46)",
 		"5.7 (5.7.44)",
 	}
@@ -207,31 +225,31 @@ func TestEngineLsDedupPrefersBranch(t *testing.T) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
 	if !rows[2].Installed {
-		t.Error("8.4 branch should carry the installed state of 8.4.11")
+		t.Error("8.4 series should carry the installed state of 8.4.11")
 	}
 }
 
 func TestEngineLsFlags(t *testing.T) {
 	reset := func() {
-		engineLsAll, engineLsInstalled, engineLsLts, engineLsBranch = false, false, false, false
+		engineLsAll, engineLsInstalled, engineLsLts, engineLsSeries = false, false, false, false
 	}
 	reset()
 	t.Cleanup(reset)
 
 	cases := []struct {
 		name                        string
-		all, installed, lts, branch bool
+		all, installed, lts, series bool
 		wantI, wantA, wantL, wantB  bool
 	}{
 		{"default", false, false, false, false, true, false, false, true},
 		{"installed", false, true, false, false, true, false, false, false},
-		{"branch", false, false, false, true, false, false, false, true},
+		{"series", false, false, false, true, false, false, false, true},
 		{"all+lts", true, false, true, false, false, true, true, false},
-		{"installed+branch", false, true, false, true, true, false, false, true},
+		{"installed+series", false, true, false, true, true, false, false, true},
 	}
 	for _, c := range cases {
 		reset()
-		engineLsAll, engineLsInstalled, engineLsLts, engineLsBranch = c.all, c.installed, c.lts, c.branch
+		engineLsAll, engineLsInstalled, engineLsLts, engineLsSeries = c.all, c.installed, c.lts, c.series
 		i, a, l, b := engineLsFlags()
 		if i != c.wantI || a != c.wantA || l != c.wantL || b != c.wantB {
 			t.Errorf("%s: engineLsFlags() = (%v,%v,%v,%v), want (%v,%v,%v,%v)",
@@ -259,7 +277,7 @@ func TestVersionLess(t *testing.T) {
 	}
 }
 
-func TestBranchNameOf(t *testing.T) {
+func TestSeriesNameOf(t *testing.T) {
 	cases := []struct {
 		version string
 		lts     bool
@@ -269,11 +287,60 @@ func TestBranchNameOf(t *testing.T) {
 		{"5.7.44", false, "5.7"},
 		{"9.7.2", true, "9.7"},
 		{"26.7.0", false, "innovation"},
-		{"26.10.1", true, "26.10"}, // calendar LTS keeps its own branch
+		{"26.10.1", true, "26.10"}, // calendar LTS keeps its own series
 	}
 	for _, c := range cases {
-		if got := branchNameOf(c.version, c.lts); got != c.want {
-			t.Errorf("branchNameOf(%q, %v) = %q, want %q", c.version, c.lts, got, c.want)
+		if got := seriesNameOf(c.version, c.lts); got != c.want {
+			t.Errorf("seriesNameOf(%q, %v) = %q, want %q", c.version, c.lts, got, c.want)
 		}
+	}
+}
+
+func TestEngineLsUnavailableStatus(t *testing.T) {
+	// 5.7.44 has no package for the current platform: listed with an
+	// explicit "unavailable" status; 8.0.46 installed stays "installed"
+	entries := markUnavailable(withInstalled(t, "8.0.46"), "5.7.44", "9.7.1", "8.4.6")
+
+	rows := buildLsRows(entries, false, true, false, false) // --all, version view
+	status := map[string]string{}
+	for _, r := range rows {
+		status[r.Label] = r.Status
+	}
+	want := map[string]string{
+		"26.7.0": "",            // installable
+		"9.7.2":  "",            // installable (LTS)
+		"9.7.1":  "unavailable", // no platform package
+		"8.4.11": "",            // installable (LTS)
+		"8.4.6":  "unavailable",
+		"8.0.46": "installed",
+		"8.0.40": "", // installable
+		"5.7.44": "unavailable",
+	}
+	for label, wantStatus := range want {
+		if status[label] != wantStatus {
+			t.Errorf("status[%s] = %q, want %q", label, status[label], wantStatus)
+		}
+	}
+
+	// series view: the series carries its representative's availability —
+	// 5.7 (5.7.44) becomes "unavailable" while 8.0 (8.0.46) stays installed
+	rows = buildLsRows(entries, false, true, false, true)
+	status = map[string]string{}
+	for _, r := range rows {
+		status[r.Label] = r.Status
+	}
+	if status["5.7 (5.7.44)"] != "unavailable" {
+		t.Errorf("series 5.7 status = %q, want unavailable", status["5.7 (5.7.44)"])
+	}
+	if status["8.0 (8.0.46)"] != "installed" {
+		t.Errorf("series 8.0 status = %q, want installed", status["8.0 (8.0.46)"])
+	}
+
+	// installed wins even when the platform has no package (it got there
+	// somehow — e.g. a future third-party channel)
+	entries = markUnavailable(withInstalled(t, "5.7.44"), "5.7.44")
+	rows = buildLsRows(entries, true, false, false, false)
+	if len(rows) != 1 || rows[0].Status != "installed" {
+		t.Fatalf("rows = %+v, want installed 5.7.44", rows)
 	}
 }

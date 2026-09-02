@@ -9,7 +9,7 @@ import (
 
 	"github.com/shapled/dbpod/internal/config"
 	"github.com/shapled/dbpod/internal/dataenv"
-	"github.com/shapled/dbpod/internal/server"
+	"github.com/shapled/dbpod/internal/instance"
 	"github.com/spf13/cobra"
 )
 
@@ -70,7 +70,7 @@ var projectCmds = []*cobra.Command{
 				return err
 			}
 			if dir == "" {
-				return fmt.Errorf("no %s found (run `dbpod init` first)", config.FileName)
+				return fmt.Errorf("no %s found (run `dbpod project init` first)", config.FileName)
 			}
 			c, err := config.Load(dir)
 			if err != nil {
@@ -97,7 +97,7 @@ var projectCmds = []*cobra.Command{
 				return err
 			}
 
-			spec := server.Spec{
+			spec := instance.Spec{
 				Name:    name,
 				Engine:  c.Engine,
 				Version: version,
@@ -105,13 +105,13 @@ var projectCmds = []*cobra.Command{
 				DataEnv: name,
 				Port:    c.Port,
 			}
-			record, err := server.Start(spec, os.Stdout)
+			record, err := instance.Start(spec, os.Stdout)
 			if err != nil {
 				return err
 			}
 
 			// first initialization: import init-sql once
-			fresh := !serverWasInitialized(record)
+			fresh := !instanceWasInitialized(record)
 			if fresh {
 				if files, err := c.ResolveInitSQL(dir); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
@@ -121,54 +121,32 @@ var projectCmds = []*cobra.Command{
 					}
 					fmt.Fprintf(os.Stdout, "imported %d init-sql file(s)\n", len(files))
 				}
-				markInitialized(record)
+				instanceMarkInitialized(record)
 			}
-			printStatus(c.Engine, c.Port)
-			return nil
-		},
-	},
-	{
-		Use:   "status",
-		Short: "Show project server status, port, pid, data size and connection string",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := projectRecord()
-			if err != nil {
-				return err
-			}
-			running := r.Running()
-			size := dataenv.DirSize(r.DataDir)
-			fmt.Fprintf(os.Stdout, "server:    %s\n", r.Name)
-			fmt.Fprintf(os.Stdout, "engine:    %s@%s\n", r.Engine, r.Version)
-			fmt.Fprintf(os.Stdout, "status:    %s\n", map[bool]string{true: "running", false: "stopped"}[running])
-			fmt.Fprintf(os.Stdout, "port:      %d\n", r.Port)
-			if running {
-				fmt.Fprintf(os.Stdout, "pid:       %d\n", r.PID)
-			}
-			fmt.Fprintf(os.Stdout, "data dir:  %s (%s)\n", r.DataDir, humanSize(size))
-			fmt.Fprintf(os.Stdout, "connect:   mysql -h 127.0.0.1 -P %d -u root\n", r.Port)
+			printStatus(record.DataDir)
 			return nil
 		},
 	},
 	{
 		Use:   "down",
-		Short: "Stop the project server",
+		Short: "Stop the project database instance",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := projectRecord()
 			if err != nil {
 				return err
 			}
-			_, err = server.Stop(r.Name, os.Stdout)
+			_, err = instance.Stop(r.Name, os.Stdout)
 			return err
 		},
 	},
 	{
 		Use:   "clean",
-		Short: "Stop the project server and remove all local dbpod state",
+		Short: "Stop the project instance and remove all local dbpod state",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if records, err := server.List(); err == nil {
+			if records, err := instance.List(); err == nil {
 				for _, r := range records {
 					if r.Running() {
-						if _, err := server.Stop(r.Name, os.Stdout); err != nil {
+						if _, err := instance.Stop(r.Name, os.Stdout); err != nil {
 							return err
 						}
 					}
@@ -194,32 +172,90 @@ var projectCmds = []*cobra.Command{
 		},
 	},
 	{
-		Use:   "logs",
-		Short: "Show project server logs",
+		Use:   "ps",
+		Short: "List running instances of this project",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := projectRecord()
+			records, err := projectInstances()
 			if err != nil {
 				return err
 			}
-			return server.Logs(r, followLogs, os.Stdout)
+			var running []*instance.Record
+			for _, r := range records {
+				if r.Running() {
+					running = append(running, r)
+				}
+			}
+			return printInstanceTable(running)
+		},
+	},
+	{
+		Use:   "logs [name]",
+		Short: "Show logs of a project instance (defaults to the only one)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := defaultProjectInstance(args)
+			if err != nil {
+				return err
+			}
+			return instance.Logs(r, followLogs, os.Stdout)
+		},
+	},
+	{
+		Use:   "exec [name] [binary] [args...]",
+		Short: "Run a binary from a project instance's engine (defaults to the only one)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := defaultProjectInstance(args)
+			if err != nil {
+				return err
+			}
+			rest := args
+			if len(rest) > 0 && rest[0] == r.Name {
+				rest = rest[1:] // explicit instance selector consumed
+			}
+			return runInstanceExec(r.Engine, r.Version, r.DataDir, rest)
 		},
 	},
 }
 
+// projectCmd groups the project-local lifecycle commands.
+var projectCmd = &cobra.Command{
+	Use:     "project",
+	Aliases: []string{"proj"},
+	Short:   "Project-local database lifecycle: init, up, down, clean",
+	Long: `Manage the database declared by this project's dbpod.yaml.
+
+  dbpod project init      generate dbpod.yaml and update .gitignore
+  dbpod project up        start the project database (first run: init + import init-sql)
+  dbpod project down      stop the project database
+  dbpod project clean     stop and remove all local dbpod state
+  dbpod project ps        list this project's instances
+  dbpod project logs      logs of a project instance (defaults to the only one)
+  dbpod project exec      run a binary of a project instance's engine`,
+	Example: `  dbpod proj up
+  dbpod proj logs -f
+  dbpod proj exec mysql -e "SELECT 1"`,
+}
+
 func init() {
 	for _, c := range projectCmds {
-		c.GroupID = "project"
 		if c.Name() == "init" {
 			c.Flags().StringVar(&initEngine, "engine", "mysql@8.0", "engine spec <engine>@<version|series>")
-			c.Flags().IntVar(&initPort, "port", 3306, "server port")
+			c.Flags().IntVar(&initPort, "port", 3306, "instance port")
 			c.Flags().BoolVarP(&forceFlag, "force", "f", false, "overwrite existing dbpod.yaml")
 		}
 		if c.Name() == "clean" {
 			c.Flags().BoolVarP(&forceFlag, "force", "f", false, "skip confirmation")
 		}
-		if c.Name() == "logs" {
-			c.Flags().BoolVarP(&followLogs, "follow", "f", false, "follow log output")
-		}
-		rootCmd.AddCommand(c)
+		projectCmd.AddCommand(c)
 	}
+	// the project logs proxy shares the global -f flag; the exec proxy
+	// passes everything after the binary through untouched
+	for _, c := range projectCmd.Commands() {
+		switch c.Name() {
+		case "logs":
+			c.Flags().BoolVarP(&followLogs, "follow", "f", false, "follow log output")
+		case "exec":
+			c.Flags().SetInterspersed(false)
+		}
+	}
+	rootCmd.AddCommand(projectCmd)
 }

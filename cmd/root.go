@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 
+	"github.com/shapled/dbpod/internal/instance"
 	"github.com/spf13/cobra"
 )
 
@@ -26,21 +27,17 @@ environment with one command.`,
 }
 
 func Execute() {
+	// reap auto-remove instances that stopped without their monitor; the
+	// monitor itself must not reap (it would kill the instance it is about
+	// to start)
+	if len(os.Args) < 2 || os.Args[1] != "monitor" {
+		instance.Reap(os.Stderr)
+	}
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
 func init() {
-	rootCmd.AddGroup(
-		&cobra.Group{
-			ID:    "project",
-			Title: "Project Commands (operate on the current project's ./.dbpod)",
-		},
-		&cobra.Group{
-			ID:    "global",
-			Title: "Global Commands",
-		},
-	)
 	rootCmd.PersistentFlags().StringVar(&mirror, "mirror", "", "mirror base URL replacing the official download host (e.g. https://mirrors.example.com/mysql)")
 }

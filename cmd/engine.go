@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
 	"github.com/shapled/dbpod/internal/dist"
+	"github.com/shapled/dbpod/internal/instance"
 	"github.com/shapled/dbpod/internal/metadata"
 	"github.com/spf13/cobra"
 )
@@ -15,7 +18,7 @@ var (
 	engineLsAll       bool
 	engineLsInstalled bool
 	engineLsLts       bool
-	engineLsBranch    bool
+	engineLsSeries    bool
 	engineLsPath      bool
 )
 
@@ -26,21 +29,21 @@ var engineCmd = &cobra.Command{
 
 var engineLsCmd = &cobra.Command{
 	Use:   "ls",
-	Short: "List engine versions (default: --installed --branch; flags are filters combined as a union)",
+	Short: "List engine versions (default: --installed --series; flags are filters combined as a union)",
 	Long: `List engine versions.
 
 All flags are FILTERS combined as a UNION: an entry is listed when it matches
-ANY given flag. With no flag the default is --installed --branch.
+ANY given flag. With no flag the default is --installed --series.
 
 Entry types:
   version  a single engine version, matched by --installed, --all, --lts
-  branch   stands for the latest version of a release branch, matched by
-           --branch and displayed as "<branch> (<latest>)". Calendar-versioned
-           non-LTS releases collapse into a single "innovation" branch;
-           LTS calendar releases keep their own branch.
+  series   stands for the latest version of a release series (e.g. 8.0),
+           matched by --series and displayed as "<series> (<latest>)".
+           Calendar-versioned non-LTS releases collapse into a single
+           "innovation" series; LTS calendar releases keep their own series.
 
-The union is deduplicated: when a version equals a branch's latest, only the
-branch entry is shown.
+The union is deduplicated: when a version equals a series' latest, only the
+series entry is shown.
 
 Columns are always: ENGINE VERSION LTS STATUS SIZE.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,30 +57,46 @@ type lsEntry struct {
 	Version   string
 	LTS       bool
 	Installed bool
+	Available bool // has an installable package for the current platform
 }
 
 // lsRow is one computed output row of engine ls.
 type lsRow struct {
-	Label     string // version or "branch (latest)"
+	Label     string // version or "series (latest)"
 	SortVer   string // underlying version: ordering, status and size key
 	LTS       bool
+	Status    string // "installed", "unavailable" or "" (installable)
 	Installed bool
 }
 
+// status derives the STATUS column: installed wins; a version without a
+// current-platform package is marked unavailable (kept visible for future
+// third-party package channels).
+func statusOf(installed, available bool) string {
+	switch {
+	case installed:
+		return "installed"
+	case !available:
+		return "unavailable"
+	default:
+		return ""
+	}
+}
+
 // engineLsFlags resolves the effective filter set: with no flag given the
-// default is --installed --branch.
-func engineLsFlags() (wantInstalled, wantAll, wantLts, wantBranch bool) {
-	anyFlag := engineLsAll || engineLsInstalled || engineLsLts || engineLsBranch
+// default is --installed --series.
+func engineLsFlags() (wantInstalled, wantAll, wantLts, wantSeries bool) {
+	anyFlag := engineLsAll || engineLsInstalled || engineLsLts || engineLsSeries
 	return engineLsInstalled || !anyFlag,
 		engineLsAll,
 		engineLsLts,
-		engineLsBranch || !anyFlag
+		engineLsSeries || !anyFlag
 }
 
 // buildLsRows applies the (unioned, deduplicated) filter logic of engine ls.
-// Branch entries stand for the latest version of their branch; a version
-// entry equal to a branch's latest is not listed twice — the branch wins.
-func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantBranch bool) []lsRow {
+// Series entries stand for the latest version of their series; a version
+// entry equal to a series' latest is not listed twice — the series wins.
+func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantSeries bool) []lsRow {
 	matches := func(version string, lts, installed bool) bool {
 		return (wantInstalled && installed) ||
 			wantAll ||
@@ -86,30 +105,31 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantBranch 
 
 	var rows []lsRow
 
-	if wantBranch {
-		// collapse into branches; each branch row = its latest version
-		type branch struct {
-			latest   string
-			latestLT bool
-			inst     bool
+	if wantSeries {
+		// collapse into series; each series row = its latest version
+		type series struct {
+			latest    string
+			latestLT  bool
+			available bool
+			inst      bool
 		}
-		branches := map[string]*branch{}
+		seriesMap := map[string]*series{}
 		for _, e := range entries {
-			name := branchNameOf(e.Version, e.LTS)
-			b := branches[name]
+			name := seriesNameOf(e.Version, e.LTS)
+			b := seriesMap[name]
 			if b == nil {
-				b = &branch{}
-				branches[name] = b
+				b = &series{}
+				seriesMap[name] = b
 			}
 			if versionLess(b.latest, e.Version) {
-				b.latest, b.latestLT, b.inst = e.Version, e.LTS, e.Installed
+				b.latest, b.latestLT, b.available, b.inst = e.Version, e.LTS, e.Available, e.Installed
 			}
 		}
 		covered := map[string]bool{}
-		for name, b := range branches {
+		for name, b := range seriesMap {
 			rows = append(rows, lsRow{
 				Label: name + " (" + b.latest + ")", SortVer: b.latest,
-				LTS: b.latestLT, Installed: b.inst,
+				LTS: b.latestLT, Status: statusOf(b.inst, b.available), Installed: b.inst,
 			})
 			covered[b.latest] = true
 		}
@@ -118,13 +138,19 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantBranch 
 				continue
 			}
 			if matches(e.Version, e.LTS, e.Installed) {
-				rows = append(rows, lsRow{Label: e.Version, SortVer: e.Version, LTS: e.LTS, Installed: e.Installed})
+				rows = append(rows, lsRow{
+					Label: e.Version, SortVer: e.Version, LTS: e.LTS,
+					Status: statusOf(e.Installed, e.Available), Installed: e.Installed,
+				})
 			}
 		}
 	} else {
 		for _, e := range entries {
 			if matches(e.Version, e.LTS, e.Installed) {
-				rows = append(rows, lsRow{Label: e.Version, SortVer: e.Version, LTS: e.LTS, Installed: e.Installed})
+				rows = append(rows, lsRow{
+					Label: e.Version, SortVer: e.Version, LTS: e.LTS,
+					Status: statusOf(e.Installed, e.Available), Installed: e.Installed,
+				})
 			}
 		}
 	}
@@ -161,7 +187,13 @@ func runEngineLs() error {
 	if ix != nil {
 		for _, v := range ix.ListVersions() {
 			vi := ix.Version(v)
-			entries = append(entries, lsEntry{Version: v, LTS: vi.LTS, Installed: installedSet["mysql@"+v]})
+			installed := installedSet["mysql@"+v]
+			avail := false
+			if vi != nil {
+				_, serr := vi.Select(runtime.GOOS, runtime.GOARCH)
+				avail = serr == nil
+			}
+			entries = append(entries, lsEntry{Version: v, LTS: vi.LTS, Installed: installed, Available: avail})
 			seen[v] = true
 		}
 	}
@@ -169,11 +201,11 @@ func runEngineLs() error {
 		if seen[ref.Version] {
 			continue
 		}
-		entries = append(entries, lsEntry{Version: ref.Version, Installed: true})
+		entries = append(entries, lsEntry{Version: ref.Version, Installed: true, Available: true})
 	}
 
-	wantInstalled, wantAll, wantLts, wantBranch := engineLsFlags()
-	rows := buildLsRows(entries, wantInstalled, wantAll, wantLts, wantBranch)
+	wantInstalled, wantAll, wantLts, wantSeries := engineLsFlags()
+	rows := buildLsRows(entries, wantInstalled, wantAll, wantLts, wantSeries)
 
 	headers := []string{"ENGINE", "VERSION", "LTS", "STATUS", "SIZE"}
 	if engineLsPath {
@@ -185,9 +217,8 @@ func runEngineLs() error {
 		return nil
 	}
 	for _, r := range rows {
-		status, size, lts, path := "", "", "", ""
+		status, size, lts, path := r.Status, "", "", ""
 		if r.Installed {
-			status = "installed"
 			size = humanSize(dist.Size("mysql", r.SortVer))
 			if engineLsPath {
 				path = dist.Path("mysql", r.SortVer)
@@ -205,9 +236,9 @@ func runEngineLs() error {
 	return tw.flush()
 }
 
-// branchNameOf maps a version to its branch: calendar-versioned non-LTS
+// seriesNameOf maps a version to its series: calendar-versioned non-LTS
 // releases collapse into "innovation"; everything else is major.minor.
-func branchNameOf(version string, lts bool) string {
+func seriesNameOf(version string, lts bool) string {
 	if calendarVersion(version) && !lts {
 		return "innovation"
 	}
@@ -269,26 +300,73 @@ var engineInstallCmd = &cobra.Command{
 }
 
 var engineRmCmd = &cobra.Command{
-	Use:     "rm <engine>@<version>",
+	Use:     "rm <engine>@<version>...",
 	Aliases: []string{"remove"},
-	Short:   "Remove the cached binary of an engine version",
-	Args:    cobra.ExactArgs(1),
+	Short:   "Remove the cached binaries of engine versions",
+	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ref, err := dist.ParseRef(args[0])
-		if err != nil {
-			return err
+		var refs []dist.PackageRef
+		for _, arg := range args {
+			ref, err := dist.ParseRef(arg)
+			if err != nil {
+				return err
+			}
+			refs = append(refs, ref)
 		}
-		return dist.Remove(ref.Engine, ref.Version)
+		// validate every target before touching anything: refuse while
+		// instances still reference any of the engine versions
+		if records, lerr := instance.List(); lerr == nil {
+			var users []string
+			for _, r := range records {
+				for _, ref := range refs {
+					if r.Engine == ref.Engine && r.Version == ref.Version {
+						users = append(users, fmt.Sprintf("%s (uses %s)", r.Name, ref))
+					}
+				}
+			}
+			if len(users) > 0 {
+				return fmt.Errorf("engine version(s) used by instance(s): %s — remove them first: dbpod rm <name>", strings.Join(users, ", "))
+			}
+		}
+		var errs []error
+		for _, ref := range refs {
+			if err := dist.Remove(ref.Engine, ref.Version); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			fmt.Fprintf(os.Stdout, "removed %s\n", ref)
+		}
+		return errors.Join(errs...)
 	},
 }
 
+// hiddenProxy builds a hidden docker-compatibility command that delegates to
+// an engine subcommand, sharing its flags and argument validation.
+func hiddenProxy(use string, target *cobra.Command) *cobra.Command {
+	c := &cobra.Command{
+		Use:    use,
+		Short:  "Docker compatibility for: dbpod engine (" + target.Name() + ")",
+		Hidden: true,
+		RunE:   target.RunE,
+		Args:   target.Args,
+	}
+	c.Flags().AddFlagSet(target.Flags())
+	return c
+}
+
 func init() {
-	engineCmd.GroupID = "global"
 	engineLsCmd.Flags().BoolVar(&engineLsInstalled, "installed", false, "list installed versions")
 	engineLsCmd.Flags().BoolVar(&engineLsAll, "all", false, "list all available versions")
 	engineLsCmd.Flags().BoolVar(&engineLsLts, "lts", false, "list LTS versions")
-	engineLsCmd.Flags().BoolVar(&engineLsBranch, "branch", false, "collapse versions into branches")
+	engineLsCmd.Flags().BoolVar(&engineLsSeries, "series", false, "collapse versions into release series (5.7, 8.0, innovation, ...)")
 	engineLsCmd.Flags().BoolVar(&engineLsPath, "path", false, "show the installation path column")
 	engineCmd.AddCommand(engineLsCmd, engineInstallCmd, engineRmCmd)
 	rootCmd.AddCommand(engineCmd)
+
+	// docker compatibility (hidden, but fully functional)
+	rootCmd.AddCommand(
+		hiddenProxy("images", engineLsCmd),
+		hiddenProxy("rmi", engineRmCmd),
+		hiddenProxy("pull", engineInstallCmd),
+	)
 }

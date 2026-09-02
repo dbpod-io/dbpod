@@ -26,6 +26,10 @@ type Engine interface {
 	// BinaryNames returns the daemon, client and admin binary names.
 	BinaryNames() (server, client, admin string)
 
+	// ExecPaths lists directories (relative to the distribution root) that
+	// hold user-facing binaries; dbpod exec prepends them to PATH.
+	ExecPaths() []string
+
 	// InitDataDir initializes an empty datadir (root account without password).
 	InitDataDir(opts Options) error
 
@@ -41,8 +45,19 @@ type Engine interface {
 	// ShutdownArgs builds the admin command line for a graceful shutdown.
 	ShutdownArgs(opts Options) []string
 
-	// ClientArgs builds the client command line for interactive shell.
+	// ClientArgs builds the client command line for interactive shell,
+	// connecting as root via the instance's unix socket (the most
+	// permissive local path).
 	ClientArgs(opts Options) []string
+
+	// SocketPath returns the unix socket path the server listens on for
+	// these options ("" when the platform has no sockets).
+	SocketPath(opts Options) string
+
+	// WriteConfig renders the server configuration file into the datadir
+	// and returns its path. The config pins every writable location
+	// (data, tmp, socket, pid, logs) inside the datadir.
+	WriteConfig(opts Options) (string, error)
 
 	// ExecArgs builds the client command line to run inline SQL (-e).
 	// SQL files are executed via client stdin.

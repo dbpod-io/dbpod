@@ -1,6 +1,7 @@
-package server
+package instance
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/shapled/dbpod/internal/dist"
@@ -15,14 +17,15 @@ import (
 	"github.com/shapled/dbpod/internal/project"
 )
 
-// Spec describes how to start (or resolve) a server.
+// Spec describes how to start (or resolve) an instance.
 type Spec struct {
-	Name    string
-	Engine  string // engine name, e.g. "mysql"
-	Version string // full version
-	DataDir string // absolute datadir
-	DataEnv string // optional data environment name
-	Port    int
+	Name       string
+	Engine     string // engine name, e.g. "mysql"
+	Version    string // full version
+	DataDir    string // absolute datadir
+	DataEnv    string // optional data environment name
+	Port       int
+	AutoRemove bool // --rm: delete all state when the server stops
 }
 
 // engineBin resolves a binary of the record's engine via the dist cache.
@@ -68,17 +71,25 @@ func killPID(pid int) error {
 	return p.Signal(syscall.SIGTERM)
 }
 
-// Start launches a detached background server for the spec, waiting until it
-// accepts connections. Idempotent: an already-running server with the same
-// name is reported, not restarted.
+// Start launches an instance: the actual server process is spawned and
+// supervised by a per-instance monitor, and Start returns once the server
+// accepts connections. Idempotent: an already-running instance is reported,
+// not restarted.
 func Start(spec Spec, stdout io.Writer) (*Record, error) {
-	if existing, err := load(spec.Name); err == nil {
-		if existing.Running() {
-			fmt.Fprintf(stdout, "server %q is already running (pid %d, port %d)\n", existing.Name, existing.PID, existing.Port)
-			return existing, nil
+	var existing *Record
+	if e, err := load(spec.Name); err == nil {
+		existing = e
+		if e.Running() {
+			fmt.Fprintf(stdout, "instance %q is already running (pid %d, port %d)\n", e.Name, e.PID, e.Port)
+			return e, nil
 		}
+		spec.AutoRemove = spec.AutoRemove || e.AutoRemove
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
 
+	// client-side pre-checks so failures surface fast (the monitor retries
+	// them anyway)
 	eng, err := engine.Get(spec.Engine)
 	if err != nil {
 		return nil, err
@@ -94,14 +105,12 @@ func Start(spec Spec, stdout io.Writer) (*Record, error) {
 		DataDir: spec.DataDir,
 		Port:    spec.Port,
 	}
-
 	if !eng.DataDirInitialized(opts) {
 		fmt.Fprintf(stdout, "initializing data directory %s\n", spec.DataDir)
 		if err := eng.InitDataDir(opts); err != nil {
 			return nil, err
 		}
 	}
-
 	logPath, err := project.ServiceLogPath(spec.Name)
 	if err != nil {
 		return nil, err
@@ -110,69 +119,105 @@ func Start(spec Spec, stdout io.Writer) (*Record, error) {
 		return nil, err
 	}
 
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	defer logFile.Close()
-
-	cmd := exec.Command(binPath, eng.ServerArgs(opts)...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.Stdin = nil
-	cmd.Dir = "/"
-	cmd.SysProcAttr = detachedAttr()
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start %s: %w", serverBin, err)
-	}
-	pid := cmd.Process.Pid
-	go func() { _ = cmd.Wait() }() // reap the child; it outlives us either way
-
 	record := &Record{
-		Name:      spec.Name,
-		Engine:    spec.Engine,
-		Version:   spec.Version,
-		DataDir:   spec.DataDir,
-		DataEnv:   spec.DataEnv,
-		Port:      spec.Port,
-		PID:       pid,
-		LogPath:   logPath,
-		CreatedAt: time.Now(),
+		Name:       spec.Name,
+		Engine:     spec.Engine,
+		Version:    spec.Version,
+		DataDir:    spec.DataDir,
+		DataEnv:    spec.DataEnv,
+		Port:       spec.Port,
+		AutoRemove: spec.AutoRemove,
+		LogPath:    logPath,
+		CreatedAt:  time.Now(),
 	}
-
-	fmt.Fprintf(stdout, "starting %s@%s on 127.0.0.1:%d (pid %d)\n", spec.Engine, spec.Version, spec.Port, pid)
-	if err := eng.WaitReady(opts, nil); err != nil {
-		tail, _ := Tail(logPath, 20)
-		_ = killPID(pid)
-		return nil, fmt.Errorf("%w\n--- last log lines (%s) ---\n%s", err, logPath, tail)
+	if existing != nil {
+		record.CreatedAt = existing.CreatedAt
 	}
 	if err := record.save(); err != nil {
 		return nil, err
 	}
-	return record, nil
+	if err := record.writeDescriptor(); err != nil {
+		return nil, err
+	}
+
+	if testing.Testing() {
+		// under `go test` self re-execution is impossible: run the monitor
+		// inline in the background instead
+		go func() { _ = RunMonitor(spec.Name, io.Discard) }()
+	} else {
+		mpid, err := spawnMonitor(spec.Name)
+		if err != nil {
+			return nil, err
+		}
+		record.MonitorPID = mpid
+		_ = record.save()
+	}
+
+	fmt.Fprintf(stdout, "starting %s@%s on 127.0.0.1:%d\n", spec.Engine, spec.Version, spec.Port)
+
+	// wait until the monitor reports the server ready
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		r, err := load(spec.Name)
+		if errors.Is(err, os.ErrNotExist) { // auto-remove reap of a died-instantly instance
+			return nil, fmt.Errorf("instance %q failed to start (see %s)", spec.Name, logPath)
+		}
+		if err == nil && r.Running() {
+			return r, nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	tail, _ := Tail(logPath, 20)
+	return nil, fmt.Errorf("instance %q did not become ready within 90s\n--- last log lines (%s) ---\n%s", spec.Name, logPath, tail)
 }
 
-// Stop performs a graceful shutdown (engine admin tool first, SIGTERM as
-// fallback) and waits for the process to exit.
+// Stop shuts a running instance down: when its monitor is alive the monitor
+// performs the graceful shutdown and the post-exit actions (--rm cleanup);
+// otherwise Stop falls back to a direct graceful shutdown.
 func Stop(name string, stdout io.Writer) (*Record, error) {
 	r, err := load(name)
 	if err != nil {
 		return nil, err
 	}
 	if !r.Running() {
-		fmt.Fprintf(stdout, "server %q is not running\n", name)
+		fmt.Fprintf(stdout, "instance %q is not running\n", name)
 		return r, nil
 	}
 	fmt.Fprintf(stdout, "stopping %q (pid %d)\n", name, r.PID)
-	if err := gracefulStop(r); err != nil {
-		return r, err
+
+	monitorAlive := r.MonitorPID > 0 && r.MonitorPID != os.Getpid() && pidAlive(r.MonitorPID)
+	if monitorAlive {
+		_ = killPID(r.MonitorPID) // monitor does the graceful shutdown + post-exit
+		_ = waitExit(r.MonitorPID, 30*time.Second)
+	} else {
+		if err := gracefulStop(r); err != nil {
+			return r, err
+		}
+		r.PID, r.MonitorPID, r.LastExitCode = 0, 0, 0
+		_ = r.save()
+		_ = r.writeDescriptor()
 	}
-	r.PID = 0
-	if err := r.save(); err != nil {
-		return nil, err
+
+	r2, lerr := load(name)
+	if errors.Is(lerr, os.ErrNotExist) { // auto-remove cleanup already ran
+		fmt.Fprintf(stdout, "instance %q removed (--rm)\n", name)
+		return nil, nil
 	}
-	fmt.Fprintf(stdout, "server %q stopped\n", name)
-	return r, nil
+	if lerr != nil {
+		return r2, lerr
+	}
+	if r2.Running() {
+		return r2, fmt.Errorf("instance %q did not stop", name)
+	}
+	if r2.AutoRemove { // direct path: finish the cleanup here
+		if _, err := Remove(name, stdout); err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(stdout, "instance %q auto-removed\n", name)
+		return nil, nil
+	}
+	fmt.Fprintf(stdout, "instance %q stopped\n", name)
+	return r2, nil
 }
 
 func gracefulStop(r *Record) error {
@@ -205,7 +250,7 @@ func Remove(name string, stdout io.Writer) (*Record, error) {
 	if err := r.remove(); err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(stdout, "server %q removed\n", name)
+	fmt.Fprintf(stdout, "instance %q removed\n", name)
 	return r, nil
 }
 

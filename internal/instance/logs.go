@@ -1,4 +1,4 @@
-package server
+package instance
 
 import (
 	"bufio"
@@ -51,7 +51,7 @@ func splitLines(s string) []string {
 func Logs(r *Record, follow bool, stdout io.Writer) error {
 	f, err := os.Open(r.LogPath)
 	if os.IsNotExist(err) {
-		return fmt.Errorf("no log file for server %q (never started?)", r.Name)
+		return fmt.Errorf("no log file for instance %q (never started?)", r.Name)
 	}
 	if err != nil {
 		return err

@@ -9,7 +9,7 @@ import (
 	"github.com/shapled/dbpod/internal/config"
 	"github.com/shapled/dbpod/internal/dist"
 	"github.com/shapled/dbpod/internal/engine"
-	"github.com/shapled/dbpod/internal/server"
+	"github.com/shapled/dbpod/internal/instance"
 )
 
 func engineGet(name string) (engine.Engine, error) {
@@ -40,21 +40,78 @@ func engineRef(engine, version string) *dist.PackageRef {
 	return &dist.PackageRef{Engine: engine, Version: version}
 }
 
-// projectRecord loads the server record of the current project (by yaml name
+// projectRecord loads the instance record of the current project (by yaml name
 // or directory name).
-func projectRecord() (*server.Record, error) {
+func projectRecord() (*instance.Record, error) {
 	dir, err := config.Dir()
 	if err != nil {
 		return nil, err
 	}
 	if dir == "" {
-		return nil, fmt.Errorf("no %s found (run `dbpod init` first)", config.FileName)
+		return nil, fmt.Errorf("no %s found (run `dbpod project init` first)", config.FileName)
 	}
 	c, err := config.Load(dir)
 	if err != nil {
 		return nil, err
 	}
-	return serverGet(projectName(c, dir))
+	return instanceGet(projectName(c, dir))
+}
+
+// projectInstances returns the instance records related to this project's
+// config: those created by `project up` (matching name or data environment).
+func projectInstances() ([]*instance.Record, error) {
+	dir, err := config.Dir()
+	if err != nil {
+		return nil, err
+	}
+	if dir == "" {
+		return nil, fmt.Errorf("no %s found (run `dbpod project init` first)", config.FileName)
+	}
+	c, err := config.Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	name := projectName(c, dir)
+	records, err := instance.List()
+	if err != nil {
+		return nil, err
+	}
+	var out []*instance.Record
+	for _, r := range records {
+		if r.Name == name || r.DataEnv == name {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// defaultProjectInstance resolves the instance for project logs/exec:
+// an explicit name wins; otherwise the sole project instance is used and
+// ambiguity is an error.
+func defaultProjectInstance(args []string) (*instance.Record, error) {
+	records, err := projectInstances()
+	if err != nil {
+		return nil, err
+	}
+	if len(args) > 0 {
+		for _, r := range records {
+			if r.Name == args[0] {
+				return r, nil
+			}
+		}
+	}
+	switch len(records) {
+	case 1:
+		return records[0], nil
+	case 0:
+		return nil, fmt.Errorf("no instances for this project; run `dbpod project up` first")
+	default:
+		names := make([]string, len(records))
+		for i, r := range records {
+			names[i] = r.Name
+		}
+		return nil, fmt.Errorf("multiple project instances (%s); specify one explicitly", strings.Join(names, ", "))
+	}
 }
 
 // dbpodDir returns the project-local .dbpod directory (cwd based).
@@ -91,12 +148,12 @@ func ensureGitignore(dir string) (bool, error) {
 // initMarker is written into the datadir after init-sql import.
 const initMarker = ".dbpod-init-done"
 
-func serverWasInitialized(r *server.Record) bool {
+func instanceWasInitialized(r *instance.Record) bool {
 	_, err := os.Stat(filepath.Join(r.DataDir, initMarker))
 	return err == nil
 }
 
-func markInitialized(r *server.Record) error {
+func instanceMarkInitialized(r *instance.Record) error {
 	return os.WriteFile(filepath.Join(r.DataDir, initMarker), []byte("ok\n"), 0o644)
 }
 
@@ -121,6 +178,10 @@ func importSQL(engName, version string, files []string, port int) error {
 	return nil
 }
 
-func printStatus(engName string, port int) {
-	fmt.Fprintf(os.Stdout, "ready: mysql -h 127.0.0.1 -P %d -u root\n", port)
+func printStatus(dataDir string) {
+	sock := ""
+	if eng, err := engineGet("mysql"); err == nil {
+		sock = eng.SocketPath(engine.Options{DataDir: dataDir})
+	}
+	fmt.Fprintf(os.Stdout, "connect: dbpod project exec mysql -u root -S %s\n", sock)
 }
