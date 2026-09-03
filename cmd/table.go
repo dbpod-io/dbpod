@@ -36,7 +36,8 @@ func (t *table) row(cells ...string) {
 func (t *table) flush() error {
 	var b strings.Builder
 	writeCells(&b, t.headers, t.widths)
-	b.WriteString(strings.Repeat("-", totalWidth(t.widths)) + "\n")
+	b.WriteString(strings.Repeat("-", totalWidth(t.widths)))
+	b.WriteString("\n")
 	for _, r := range t.rows {
 		writeCells(&b, r, t.widths)
 	}
@@ -47,7 +48,8 @@ func (t *table) flush() error {
 func writeCells(b *strings.Builder, cells []string, widths []int) {
 	for i, c := range cells {
 		pad := widths[i] - runewidth(c)
-		b.WriteString(c + strings.Repeat(" ", pad+2))
+		b.WriteString(c)
+		b.WriteString(strings.Repeat(" ", pad+2))
 	}
 	b.WriteString("\n")
 }

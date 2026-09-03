@@ -220,12 +220,15 @@ func TestLifecycleRemoveStopped(t *testing.T) {
 	if _, err := Stop(name, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	// stopped -> Remove -> gone
+	// stopped -> Remove -> gone (record AND the default wrapper dir)
 	if _, err := Remove(name, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := load(name); err == nil {
 		t.Error("record still exists after Remove")
+	}
+	if _, err := os.Stat(filepath.Join(instancesBase(t), name)); !os.IsNotExist(err) {
+		t.Error("wrapper dir still exists after Remove")
 	}
 }
 
@@ -245,6 +248,7 @@ func loadDescriptor(dataDir string) (*Record, error) {
 // TestRunningPidFallback verifies PID discovery: a live pid recorded only in
 // the engine pidfile marks the record running; a dead pid does not.
 func TestRunningPidFallback(t *testing.T) {
+	t.Setenv("DBPOD_HOME", t.TempDir()) // the pid-recovery path persists the record
 	dir := t.TempDir()
 
 	// a real, short-lived process as the "server"
@@ -267,7 +271,7 @@ func TestRunningPidFallback(t *testing.T) {
 	}
 
 	// live pid in the engine pidfile, record pid unset -> recovered
-	if err := os.WriteFile(filepath.Join(dir, "dbpod.pid"), []byte(fmt.Sprint(livePID)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "dbpod.pid"), fmt.Append(nil, livePID), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if !r.Running() {
@@ -278,7 +282,7 @@ func TestRunningPidFallback(t *testing.T) {
 	}
 
 	// dead pid everywhere -> not running
-	if err := os.WriteFile(filepath.Join(dir, "dbpod.pid"), []byte(fmt.Sprint(deadPID)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "dbpod.pid"), fmt.Append(nil, deadPID), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	r.PID = 0

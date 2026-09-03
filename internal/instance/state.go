@@ -81,7 +81,10 @@ func (r *Record) save() error {
 }
 
 // remove deletes the instance record, its stale pid file, the datadir
-// descriptor AND the datadir itself.
+// descriptor AND the datadir itself. When the datadir follows the default
+// layout (<instances-dir>/<name>/data), the emptied <name> wrapper is
+// removed as well. Custom datadir locations are untouched beyond their
+// own directory.
 func (r *Record) remove() error {
 	path, err := recordPath(r.Name)
 	if err != nil {
@@ -92,7 +95,18 @@ func (r *Record) remove() error {
 	}
 	_ = os.Remove(filepath.Join(r.DataDir, "dbpod.pid"))
 	_ = os.Remove(filepath.Join(r.DataDir, descriptorName))
-	return os.RemoveAll(r.DataDir)
+	if err := os.RemoveAll(r.DataDir); err != nil {
+		return err
+	}
+	// drop the now-empty default wrapper dir (<instances-dir>/<name>);
+	// never touch the parent of a custom datadir location
+	if instancesDir, ierr := project.InstancesDir(); ierr == nil {
+		if parent := filepath.Dir(r.DataDir); parent != instancesDir &&
+			strings.HasPrefix(parent, instancesDir+string(filepath.Separator)) {
+			_ = os.Remove(parent) // only succeeds when empty
+		}
+	}
+	return nil
 }
 
 // descriptorName is the self-describing copy of the record kept inside the
