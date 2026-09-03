@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/shapled/dbpod/internal/dist"
 	"github.com/shapled/dbpod/internal/engine"
 	"github.com/shapled/dbpod/internal/project"
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 // Spec describes how to start (or resolve) an instance.
@@ -50,16 +52,29 @@ func (r *Record) Running() bool {
 	return false
 }
 
-// pidAlive checks process existence (signal 0).
+// pidAlive checks process liveness. A zombie answers signal 0 but is dead
+// for our purposes, so the process status is consulted through gopsutil
+// (works on /proc, libproc and Windows APIs — no external commands).
 func pidAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	p, err := os.FindProcess(pid)
+	p, err := process.NewProcess(int32(pid))
 	if err != nil {
-		return false
+		return false // process does not exist
 	}
-	return p.Signal(syscall.Signal(0)) == nil
+	statuses, err := p.Status()
+	if err != nil {
+		// exists but status unavailable — fall back to signal 0
+		return p.SendSignal(syscall.Signal(0)) == nil
+	}
+	for _, st := range statuses {
+		switch strings.ToLower(strings.TrimSpace(st)) {
+		case "", "z", "zombie", "dead", "x", "empty":
+			return false // zombie / dead state
+		}
+	}
+	return true
 }
 
 // killPID sends SIGTERM (best effort).
@@ -69,6 +84,15 @@ func killPID(pid int) error {
 		return err
 	}
 	return p.Signal(syscall.SIGTERM)
+}
+
+// forceKillPID sends SIGKILL (last resort escalation).
+func forceKillPID(pid int) error {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return p.Signal(syscall.SIGKILL)
 }
 
 // Start launches an instance: the actual server process is spawned and
@@ -187,16 +211,37 @@ func Stop(name string, stdout io.Writer) (*Record, error) {
 
 	monitorAlive := r.MonitorPID > 0 && r.MonitorPID != os.Getpid() && pidAlive(r.MonitorPID)
 	if monitorAlive {
-		_ = killPID(r.MonitorPID) // monitor does the graceful shutdown + post-exit
-		_ = waitExit(r.MonitorPID, 30*time.Second)
-	} else {
-		if err := gracefulStop(r); err != nil {
-			return r, err
+		// TERM the monitor: it performs the graceful shutdown and updates
+		// the record. We wait for the SERVER to exit — if it survives
+		// (e.g. an older monitor without escalation) we kill it ourselves.
+		_ = killPID(r.MonitorPID)
+		if err := waitExit(r.PID, 35*time.Second); err == nil {
+			r2, lerr := load(name)
+			if errors.Is(lerr, os.ErrNotExist) { // auto-remove cleanup already ran
+				fmt.Fprintf(stdout, "instance %q removed (--rm)\n", name)
+				return nil, nil
+			}
+			if lerr == nil && r2.AutoRemove {
+				if _, err := Remove(name, stdout); err != nil {
+					return nil, err
+				}
+				fmt.Fprintf(stdout, "instance %q auto-removed\n", name)
+				return nil, nil
+			}
+			if lerr == nil {
+				fmt.Fprintf(stdout, "instance %q stopped\n", name)
+			}
+			return r2, lerr
 		}
-		r.PID, r.MonitorPID, r.LastExitCode = 0, 0, 0
-		_ = r.save()
-		_ = r.writeDescriptor()
+		fmt.Fprintf(stdout, "server survived the monitor shutdown; forcing SIGKILL\n")
 	}
+
+	if err := gracefulStop(r); err != nil {
+		return r, err
+	}
+	r.PID, r.MonitorPID, r.LastExitCode = 0, 0, 0
+	_ = r.save()
+	_ = r.writeDescriptor()
 
 	r2, lerr := load(name)
 	if errors.Is(lerr, os.ErrNotExist) { // auto-remove cleanup already ran
@@ -220,20 +265,29 @@ func Stop(name string, stdout io.Writer) (*Record, error) {
 	return r2, nil
 }
 
+// gracefulStop shuts the server down with escalating force: engine admin
+// tool -> SIGTERM -> SIGKILL (a wedged server must never survive a kill).
 func gracefulStop(r *Record) error {
 	if eng, err := engine.Get(r.Engine); err == nil {
 		_, _, admin := eng.BinaryNames()
 		if adminPath, err := engineBin(r.Engine, r.Version, admin); err == nil {
 			opts := engine.Options{DataDir: r.DataDir, Port: r.Port, BinDir: filepath.Dir(adminPath)}
 			if err := exec.Command(adminPath, eng.ShutdownArgs(opts)...).Run(); err == nil {
-				return waitExit(r.PID, 30*time.Second)
+				if err := waitExit(r.PID, 30*time.Second); err == nil {
+					return nil
+				}
 			}
 		}
 	}
-	if err := killPID(r.PID); err != nil {
+	if err := killPID(r.PID); err == nil {
+		if err := waitExit(r.PID, 30*time.Second); err == nil {
+			return nil
+		}
+	}
+	if err := forceKillPID(r.PID); err != nil {
 		return err
 	}
-	return waitExit(r.PID, 30*time.Second)
+	return waitExit(r.PID, 5*time.Second)
 }
 
 // Remove stops the server (if running) and deletes its record.

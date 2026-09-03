@@ -200,6 +200,17 @@ var projectCmds = []*cobra.Command{
 		},
 	},
 	{
+		Use:   "inspect [name]",
+		Short: "Output project instance details in JSON format (defaults to the only one)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := defaultProjectInstance(args)
+			if err != nil {
+				return err
+			}
+			return printInspectJSON([]*instance.Record{r})
+		},
+	},
+	{
 		Use:   "exec [name] [binary] [args...]",
 		Short: "Run a binary from a project instance's engine (defaults to the only one)",
 		RunE: func(cmd *cobra.Command, args []string) error {

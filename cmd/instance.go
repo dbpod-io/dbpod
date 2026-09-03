@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -202,6 +203,62 @@ var rmCmd = &cobra.Command{
 		}
 		return errors.Join(errs...)
 	},
+}
+
+var inspectCmd = &cobra.Command{
+	Use:   "inspect <name>...",
+	Short: "Output detailed instance information in JSON format",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var records []*instance.Record
+		var missing []string
+		for _, name := range args {
+			r, err := instanceGet(name)
+			if err != nil {
+				missing = append(missing, name)
+				continue
+			}
+			records = append(records, r)
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("instance(s) not found: %s", strings.Join(missing, ", "))
+		}
+		return printInspectJSON(records)
+	},
+}
+
+// inspectView is the JSON shape of `dbpod inspect`: the persisted record
+// enriched with computed fields.
+type inspectView struct {
+	instance.Record
+	Running  bool   `json:"running"`
+	DataSize int64  `json:"data_size"`
+	Socket   string `json:"socket"`
+}
+
+// printInspectJSON writes enriched instance details (record fields plus
+// computed running/size/socket information) as pretty-printed JSON.
+func printInspectJSON(records []*instance.Record) error {
+	views := make([]inspectView, 0, len(records))
+	for _, r := range records {
+		eng, err := engineGet(r.Engine)
+		if err != nil {
+			return err
+		}
+		sock := eng.SocketPath(engine.Options{DataDir: r.DataDir})
+		views = append(views, inspectView{
+			Record:   *r,
+			Running:  r.Running(),
+			DataSize: dataenv.DirSize(r.DataDir),
+			Socket:   sock,
+		})
+	}
+	data, err := json.MarshalIndent(views, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, string(data))
+	return nil
 }
 
 var psCmd = &cobra.Command{
@@ -459,7 +516,7 @@ func init() {
 	rmCmd.Flags().BoolVarP(&rmForce, "force", "f", false, "skip confirmation")
 	monitorCmd.Flags().StringVar(&monitorName, "name", "", "instance name")
 
-	rootCmd.AddCommand(runCmd, startCmd, killCmd, rmCmd, psCmd, logsCmd)
+	rootCmd.AddCommand(runCmd, startCmd, killCmd, rmCmd, psCmd, logsCmd, inspectCmd)
 	rootCmd.AddCommand(monitorCmd)
 }
 
