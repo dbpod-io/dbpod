@@ -169,3 +169,13 @@ func safeRel(name string) string {
 	name = strings.TrimLeft(name, "/")
 	return filepath.Clean(name)
 }
+
+// xzReader wraps an xz stream (deb data.tar.xz payloads).
+func xzReader(r io.Reader) (io.Reader, error) {
+	return xz.NewReader(r)
+}
+
+// zstdReader is a placeholder: zstd payloads are not supported yet.
+func zstdReader(r io.Reader) (io.Reader, error) {
+	return nil, fmt.Errorf("zstd-compressed payloads are not supported yet")
+}

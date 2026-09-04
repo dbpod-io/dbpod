@@ -178,10 +178,6 @@ func importSQL(engName, version string, files []string, port int) error {
 	return nil
 }
 
-func printStatus(dataDir string) {
-	sock := ""
-	if eng, err := engineGet("mysql"); err == nil {
-		sock = eng.SocketPath(engine.Options{DataDir: dataDir})
-	}
-	fmt.Fprintf(os.Stdout, "connect: dbpod project exec mysql -u root -S %s\n", sock)
+func printStatus() {
+	fmt.Fprintf(os.Stdout, "connect: dbpod project exec\n")
 }

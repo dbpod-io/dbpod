@@ -14,7 +14,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/shapled/dbpod/internal/metadata"
 	"github.com/shapled/dbpod/internal/project"
 )
 
@@ -117,7 +116,8 @@ func ListLocal() ([]PackageRef, error) {
 	return out, nil
 }
 
-// Remove deletes the cached distribution of engine@version.
+// Remove deletes the cached distribution of engine@version, then prunes
+// the now-empty version and engine parent directories so no husks remain.
 func Remove(engine, version string) error {
 	if !Installed(engine, version) {
 		return fmt.Errorf("engine %s is not installed", engine+"@"+version)
@@ -126,7 +126,15 @@ func Remove(engine, version string) error {
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll(base)
+	if err := os.RemoveAll(base); err != nil {
+		return err
+	}
+	versionDir := filepath.Dir(base)
+	if v, relErr := filepath.Rel(project.VersionsDirMust(), versionDir); relErr == nil && !strings.HasPrefix(v, "..") {
+		_ = os.Remove(versionDir)               // only succeeds when empty
+		_ = os.Remove(filepath.Dir(versionDir)) // engine dir: only when empty
+	}
+	return nil
 }
 
 // Path returns the installation directory of an installed distribution
@@ -176,21 +184,25 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 		return nil
 	}
 
-	ix, info, err := metadata.EnsurePackages(ref.Engine, ref.Version, mirror)
+	cat, err := CatalogFor(ref.Engine)
 	if err != nil {
 		return err
 	}
-	ref.Version = info.Version // series like "8.0" resolved to full version
+	version, err := cat.ResolveVersion(ref.Version, mirror)
+	if err != nil {
+		return err
+	}
+	ref.Version = version // series like "8.0" resolved to full version
 	if Installed(ref.Engine, ref.Version) {
 		fmt.Fprintf(stdout, "%s already installed\n", ref)
 		return nil
 	}
 
-	pkg, err := info.Select(runtime.GOOS, runtime.GOARCH)
+	pkg, err := cat.Resolve(ref.Version, runtime.GOOS, runtime.GOARCH, mirror)
 	if err != nil {
 		return err
 	}
-	url := ix.DownloadURL(pkg)
+	url := pkg.URL
 	fmt.Fprintf(stdout, "resolved %s -> %s (%s)\n", ref, ref.Version, pkg.Filename)
 	fmt.Fprintf(stdout, "downloading %s\n", url)
 
@@ -216,10 +228,39 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return err
 	}
+
+	// PGDG-style packages: companion dependency archives (shared libs) are
+	// downloaded and extracted alongside the main archive
+	var depArchives []string
+	for i, dep := range pkg.DepURLs {
+		fmt.Fprintf(stdout, "downloading dependency %d/%d: %s\n", i+1, len(pkg.DepURLs), dep.URL)
+		depPath, derr := download(dep.URL, "", 0, io.Discard)
+		if derr != nil {
+			return derr
+		}
+		depArchives = append(depArchives, depPath)
+		defer os.Remove(depPath)
+		_ = dep.SHA256 // checksums for dependency archives: verify when published
+	}
+
 	fmt.Fprintf(stdout, "extracting to %s\n", base)
+
+	// deb/rpm pipelines extract with prefix-mapping rules (bin/lib/share/
+	// shared_libs); regular archives use the generic extractor
+	if pkg.Kind == "deb" || pkg.Kind == "rpm" {
+		if err := extractEnginePackage(pkg.Kind, archive, depArchives, base, pkg.ExtractRules); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "installed %s\n", ref)
+		return nil
+	}
+
 	rel, err := extract(pkg.Kind, archive, base)
 	if err != nil {
 		return err
+	}
+	if pkg.RootDir != "" { // explicit root hint wins over /bin/ probing
+		rel = pkg.RootDir
 	}
 	if err := os.WriteFile(filepath.Join(base, ".dbpod-root"), []byte(rel+"\n"), 0o644); err != nil {
 		return err

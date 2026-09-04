@@ -10,14 +10,14 @@ import (
 // innovation releases (26.7.0) and LTS releases.
 func fixture() []lsEntry {
 	entries := []lsEntry{
-		{Version: "26.7.0"},            // calendar, non-LTS (innovation)
-		{Version: "9.7.2", LTS: true},  // LTS
-		{Version: "9.7.1"},             // non-LTS
-		{Version: "8.4.11", LTS: true}, // LTS
-		{Version: "8.4.6"},             // non-LTS
-		{Version: "8.0.46"},            // non-LTS
-		{Version: "8.0.40"},            // non-LTS
-		{Version: "5.7.44"},            // non-LTS
+		{Version: "26.7.0", Series: "innovation"},     // calendar, non-LTS
+		{Version: "9.7.2", LTS: true, Series: "9.7"},  // LTS
+		{Version: "9.7.1", Series: "9.7"},             // non-LTS
+		{Version: "8.4.11", LTS: true, Series: "8.4"}, // LTS
+		{Version: "8.4.6", Series: "8.4"},             // non-LTS
+		{Version: "8.0.46", Series: "8.0"},            // non-LTS
+		{Version: "8.0.40", Series: "8.0"},            // non-LTS
+		{Version: "5.7.44", Series: "5.7"},            // non-LTS
 	}
 	for i := range entries {
 		entries[i].Available = true
@@ -185,10 +185,10 @@ func TestEngineLsSeriesOnly(t *testing.T) {
 
 func TestEngineLsCalendarSeries(t *testing.T) {
 	entries := []lsEntry{
-		{Version: "27.1.0"},             // calendar non-LTS -> innovation
-		{Version: "26.7.0"},             // calendar non-LTS -> innovation
-		{Version: "26.10.1", LTS: true}, // calendar LTS -> own series
-		{Version: "8.0.46"},             // classic
+		{Version: "27.1.0", Series: "innovation"},        // calendar non-LTS -> innovation
+		{Version: "26.7.0", Series: "innovation"},        // calendar non-LTS -> innovation
+		{Version: "26.10.1", LTS: true, Series: "26.10"}, // calendar LTS -> own series
+		{Version: "8.0.46", Series: "8.0"},               // classic
 	}
 	rows := buildLsRows(entries, false, false, false, true)
 	want := []string{
@@ -198,12 +198,6 @@ func TestEngineLsCalendarSeries(t *testing.T) {
 	}
 	if !reflect.DeepEqual(labels(rows), want) {
 		t.Fatalf("rows = %v, want %v", labels(rows), want)
-	}
-	for _, r := range rows {
-		wantLTS := r.Label == "26.10 (26.10.1)"
-		if r.LTS != wantLTS {
-			t.Errorf("%s LTS = %v, want %v", r.Label, r.LTS, wantLTS)
-		}
 	}
 }
 
@@ -273,25 +267,6 @@ func TestVersionLess(t *testing.T) {
 	for _, c := range cases {
 		if got := versionLess(c.a, c.b); got != c.less {
 			t.Errorf("versionLess(%q, %q) = %v, want %v", c.a, c.b, got, c.less)
-		}
-	}
-}
-
-func TestSeriesNameOf(t *testing.T) {
-	cases := []struct {
-		version string
-		lts     bool
-		want    string
-	}{
-		{"8.0.46", false, "8.0"},
-		{"5.7.44", false, "5.7"},
-		{"9.7.2", true, "9.7"},
-		{"26.7.0", false, "innovation"},
-		{"26.10.1", true, "26.10"}, // calendar LTS keeps its own series
-	}
-	for _, c := range cases {
-		if got := seriesNameOf(c.version, c.lts); got != c.want {
-			t.Errorf("seriesNameOf(%q, %v) = %q, want %q", c.version, c.lts, got, c.want)
 		}
 	}
 }

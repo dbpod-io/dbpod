@@ -18,7 +18,6 @@ import (
 	"github.com/shapled/dbpod/internal/dist"
 	"github.com/shapled/dbpod/internal/engine"
 	"github.com/shapled/dbpod/internal/instance"
-	"github.com/shapled/dbpod/internal/metadata"
 	"github.com/shapled/dbpod/internal/project"
 	"github.com/spf13/cobra"
 )
@@ -62,7 +61,7 @@ same name is started again.`,
 		if err != nil {
 			return err
 		}
-		printConnString(spec.Name, spec.DataDir)
+		printConnString(spec.Name)
 
 		// -d: the per-instance monitor keeps the instance running; we are done
 		if runDetach {
@@ -126,7 +125,7 @@ var startCmd = &cobra.Command{
 				errs = append(errs, err)
 				continue
 			}
-			printConnString(r.Name, r.DataDir)
+			printConnString(r.Name)
 		}
 		return errors.Join(errs...)
 	},
@@ -245,7 +244,7 @@ func printInspectJSON(records []*instance.Record) error {
 		if err != nil {
 			return err
 		}
-		sock := eng.SocketPath(engine.Options{DataDir: r.DataDir})
+		sock := eng.SocketPath(engine.Options{DataDir: r.DataDir, Port: r.Port})
 		views = append(views, inspectView{
 			Record:   *r,
 			Running:  r.Running(),
@@ -384,37 +383,10 @@ func freePort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-// resolveVersion turns a possibly-series version ("8.0") into a full version,
-// preferring a locally installed match, then the latest known release.
+// resolveVersion turns a possibly-series version ("8.0") into a full version
+// (delegates to the engine catalog).
 func resolveVersion(ref dist.PackageRef) (string, error) {
-	if strings.Count(ref.Version, ".") >= 2 {
-		return ref.Version, nil // already full
-	}
-	// installed match?
-	local, err := dist.ListLocal()
-	if err != nil {
-		return "", err
-	}
-	best := ""
-	for _, l := range local {
-		if l.Engine == ref.Engine && strings.HasPrefix(l.Version, ref.Version+".") && l.Version > best {
-			best = l.Version
-		}
-	}
-	if best != "" {
-		return best, nil
-	}
-	// latest known in that series
-	ix, err := metadata.EnsureVersions(ref.Engine, mirror)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve series %q: %w (install a full version, e.g. %s@8.0.35)", ref.Version, err, ref.Engine)
-	}
-	for _, v := range ix.ListVersions() {
-		if strings.HasPrefix(v, ref.Version+".") {
-			return v, nil
-		}
-	}
-	return "", fmt.Errorf("no known version in series %s for engine %s", ref.Version, ref.Engine)
+	return dist.ResolveVersion(ref.Engine, ref.Version, mirror)
 }
 
 // ensureEngine installs engine@version when missing.
@@ -469,27 +441,8 @@ func instanceGet(name string) (*instance.Record, error) {
 	return nil, fmt.Errorf("instance %q does not exist", name)
 }
 
-func printConnString(name, dataDir string) {
-	sock := instanceSocket(name, dataDir)
-	fmt.Fprintf(os.Stdout, "connect: dbpod exec %s mysql -u root -S %s\n", name, sock)
-}
-
-// instanceSocket resolves the unix socket path of an instance.
-func instanceSocket(name, dataDir string) string {
-	eng, err := engineGet(name2engine(name))
-	if err != nil {
-		return ""
-	}
-	return eng.SocketPath(engine.Options{DataDir: dataDir})
-}
-
-// name2engine maps an instance name to its engine via the record; on any
-// failure it falls back to mysql (the only supported engine today).
-func name2engine(name string) string {
-	if r, err := instanceGet(name); err == nil {
-		return r.Engine
-	}
-	return "mysql"
+func printConnString(name string) {
+	fmt.Fprintf(os.Stdout, "connect: dbpod exec %s\n", name)
 }
 
 var monitorName string

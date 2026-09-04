@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/shapled/dbpod/internal/dist"
 	"github.com/shapled/dbpod/internal/instance"
-	"github.com/shapled/dbpod/internal/metadata"
 	"github.com/spf13/cobra"
 )
 
@@ -51,10 +51,12 @@ Columns are always: ENGINE VERSION LTS STATUS SIZE.`,
 	},
 }
 
-// lsEntry is one version in the engine-ls universe (merged from the metadata
-// index and local installs).
+// lsEntry is one version in the engine-ls universe (merged from the
+// catalogs and local installs).
 type lsEntry struct {
+	Engine    string
 	Version   string
+	Series    string // release series the version belongs to (engine-specific)
 	LTS       bool
 	Installed bool
 	Available bool // has an installable package for the current platform
@@ -62,6 +64,7 @@ type lsEntry struct {
 
 // lsRow is one computed output row of engine ls.
 type lsRow struct {
+	Engine    string
 	Label     string // version or "series (latest)"
 	SortVer   string // underlying version: ordering, status and size key
 	LTS       bool
@@ -108,6 +111,7 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantSeries 
 	if wantSeries {
 		// collapse into series; each series row = its latest version
 		type series struct {
+			engine    string
 			latest    string
 			latestLT  bool
 			available bool
@@ -115,10 +119,10 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantSeries 
 		}
 		seriesMap := map[string]*series{}
 		for _, e := range entries {
-			name := seriesNameOf(e.Version, e.LTS)
+			name := e.Series
 			b := seriesMap[name]
 			if b == nil {
-				b = &series{}
+				b = &series{engine: e.Engine}
 				seriesMap[name] = b
 			}
 			if versionLess(b.latest, e.Version) {
@@ -128,7 +132,8 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantSeries 
 		covered := map[string]bool{}
 		for name, b := range seriesMap {
 			rows = append(rows, lsRow{
-				Label: name + " (" + b.latest + ")", SortVer: b.latest,
+				Engine: b.engine,
+				Label:  name + " (" + b.latest + ")", SortVer: b.latest,
 				LTS: b.latestLT, Status: statusOf(b.inst, b.available), Installed: b.inst,
 			})
 			covered[b.latest] = true
@@ -139,7 +144,7 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantSeries 
 			}
 			if matches(e.Version, e.LTS, e.Installed) {
 				rows = append(rows, lsRow{
-					Label: e.Version, SortVer: e.Version, LTS: e.LTS,
+					Engine: e.Engine, Label: e.Version, SortVer: e.Version, LTS: e.LTS,
 					Status: statusOf(e.Installed, e.Available), Installed: e.Installed,
 				})
 			}
@@ -148,21 +153,20 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantSeries 
 		for _, e := range entries {
 			if matches(e.Version, e.LTS, e.Installed) {
 				rows = append(rows, lsRow{
-					Label: e.Version, SortVer: e.Version, LTS: e.LTS,
+					Engine: e.Engine, Label: e.Version, SortVer: e.Version, LTS: e.LTS,
 					Status: statusOf(e.Installed, e.Available), Installed: e.Installed,
 				})
 			}
 		}
 	}
 
-	// sort newest first
-	for i := 0; i < len(rows); i++ {
-		for j := i + 1; j < len(rows); j++ {
-			if versionLess(rows[i].SortVer, rows[j].SortVer) {
-				rows[i], rows[j] = rows[j], rows[i]
-			}
+	// sort by engine name, then version newest first
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Engine != rows[j].Engine {
+			return rows[i].Engine < rows[j].Engine
 		}
-	}
+		return versionLess(rows[j].SortVer, rows[i].SortVer)
+	})
 	return rows
 }
 
@@ -176,32 +180,46 @@ func runEngineLs() error {
 		installedSet[ref.Engine+"@"+ref.Version] = true
 	}
 
-	ix, err := metadata.EnsureVersions("mysql", mirror)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "note: cannot fetch available versions:", err)
-	}
-
-	// merge index + local-only installs into the entry universe
+	// merge every engine catalog + local-only installs into the entry universe
 	var entries []lsEntry
 	seen := map[string]bool{}
-	if ix != nil {
+	for _, cat := range dist.Catalogs() {
+		ix, err := cat.EnsureVersions(mirror)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "note: cannot fetch %s versions: %v\n", cat.Engine(), err)
+			continue
+		}
+		var catEntries []lsEntry
 		for _, v := range ix.ListVersions() {
 			vi := ix.Version(v)
-			installed := installedSet["mysql@"+v]
+			installed := installedSet[cat.Engine()+"@"+v]
 			avail := false
 			if vi != nil {
 				_, serr := vi.Select(runtime.GOOS, runtime.GOARCH)
 				avail = serr == nil
 			}
-			entries = append(entries, lsEntry{Version: v, LTS: vi.LTS, Installed: installed, Available: avail})
+			catEntries = append(catEntries, lsEntry{
+				Engine: cat.Engine(), Version: v, LTS: vi.LTS, Installed: installed, Available: avail,
+			})
 			seen[v] = true
 		}
-	}
-	for _, ref := range local {
-		if seen[ref.Version] {
-			continue
+		for _, ref := range local { // installed versions missing from the catalog
+			if ref.Engine != cat.Engine() || seen[ref.Version] {
+				continue
+			}
+			catEntries = append(catEntries, lsEntry{
+				Engine: ref.Engine, Version: ref.Version, Installed: true, Available: true,
+			})
 		}
-		entries = append(entries, lsEntry{Version: ref.Version, Installed: true, Available: true})
+		// newest first; the newest entry is the engine's latest
+		sort.SliceStable(catEntries, func(i, j int) bool {
+			return versionLess(catEntries[j].Version, catEntries[i].Version)
+		})
+		for i := range catEntries {
+			e := catEntries[i]
+			catEntries[i].Series = cat.SeriesOf(e.Version, e.LTS, i == 0)
+		}
+		entries = append(entries, catEntries...)
 	}
 
 	wantInstalled, wantAll, wantLts, wantSeries := engineLsFlags()
@@ -219,47 +237,21 @@ func runEngineLs() error {
 	for _, r := range rows {
 		status, size, lts, path := r.Status, "", "", ""
 		if r.Installed {
-			size = humanSize(dist.Size("mysql", r.SortVer))
+			size = humanSize(dist.Size(r.Engine, r.SortVer))
 			if engineLsPath {
-				path = dist.Path("mysql", r.SortVer)
+				path = dist.Path(r.Engine, r.SortVer)
 			}
 		}
 		if r.LTS {
 			lts = "yes"
 		}
-		cells := []string{"mysql", r.Label, lts, status, size}
+		cells := []string{r.Engine, r.Label, lts, status, size}
 		if engineLsPath {
 			cells = append(cells, path)
 		}
 		tw.row(cells...)
 	}
 	return tw.flush()
-}
-
-// seriesNameOf maps a version to its series: calendar-versioned non-LTS
-// releases collapse into "innovation"; everything else is major.minor.
-func seriesNameOf(version string, lts bool) string {
-	if calendarVersion(version) && !lts {
-		return "innovation"
-	}
-	return majorMinor(version)
-}
-
-// calendarVersion reports whether the version uses calendar versioning
-// (major >= 10, e.g. 26.7.0) instead of the classic scheme (5.7 ... 9.7).
-func calendarVersion(version string) bool {
-	major, _, _ := strings.Cut(version, ".")
-	n, err := strconv.Atoi(major)
-	return err == nil && n >= 10
-}
-
-func majorMinor(version string) string {
-	major, rest, _ := strings.Cut(version, ".")
-	if rest == "" {
-		return major
-	}
-	minor, _, _ := strings.Cut(rest, ".")
-	return major + "." + minor
 }
 
 // versionLess compares dotted numeric versions; shorter strings sort first.

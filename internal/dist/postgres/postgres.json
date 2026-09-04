@@ -1,0 +1,32 @@
+{
+  "versions": {
+    "17.2": {
+      "darwin-arm64": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-17.2-1-osx-binaries.zip",
+        "kind": "zip"
+      },
+      "darwin-amd64": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-17.2-1-osx-binaries.zip",
+        "kind": "zip"
+      },
+      "windows-amd64": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-17.2-1-windows-x64-binaries.zip",
+        "kind": "zip"
+      }
+    },
+    "16.8": {
+      "darwin-arm64": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-16.8-1-osx-binaries.zip",
+        "kind": "zip"
+      },
+      "darwin-amd64": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-16.8-1-osx-binaries.zip",
+        "kind": "zip"
+      },
+      "windows-amd64": {
+        "url": "https://get.enterprisedb.com/postgresql/postgresql-16.8-1-windows-x64-binaries.zip",
+        "kind": "zip"
+      }
+    }
+  }
+}

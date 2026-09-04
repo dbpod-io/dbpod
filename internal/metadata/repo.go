@@ -18,7 +18,7 @@ import (
 const (
 	repoOwner  = "shapled"
 	repoName   = "dbpod"
-	repoBranch = "main"
+	repoBranch = "master"
 	repoPath   = "internal/metadata/data/mysql.json"
 
 	// OfficialDownloadsBase is the BaseURL for official (repository or

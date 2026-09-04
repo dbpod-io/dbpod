@@ -226,6 +226,9 @@ func (e *Engine) ExecArgs(opts engine.Options, inlineSQL string) []string {
 	return args
 }
 
+// Env: MySQL distributions are self-contained; no extra variables needed.
+func (e *Engine) Env(opts engine.Options) []string { return nil }
+
 func engineBinary(opts engine.Options, name string) (string, error) {
 	p := filepath.Join(opts.BinDir, name)
 	if _, err := os.Stat(p); err != nil {

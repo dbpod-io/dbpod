@@ -58,6 +58,7 @@ func RunMonitor(name string, stdout io.Writer) error {
 	defer logFile.Close()
 
 	cmd := exec.Command(binPath, eng.ServerArgs(opts)...)
+	cmd.Env = append(os.Environ(), eng.Env(opts)...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Stdin = nil

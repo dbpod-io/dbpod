@@ -42,11 +42,11 @@ engine's default client:
 The process exit code is propagated.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		engName, version, dataDir, err := resolveExecTarget(args[0])
+		engName, version, port, dataDir, err := resolveExecTarget(args[0])
 		if err != nil {
 			return err
 		}
-		return runInstanceExec(engName, version, dataDir, args[1:])
+		return runInstanceExec(engName, version, port, dataDir, args[1:])
 	},
 }
 
@@ -54,7 +54,7 @@ The process exit code is propagated.`,
 // (shared by `dbpod exec` and `dbpod project exec`). When dataDir is set
 // (an instance target) the default client is pre-wired with root@socket
 // connection parameters.
-func runInstanceExec(engName, version, dataDir string, rest []string) error {
+func runInstanceExec(engName, version string, port int, dataDir string, rest []string) error {
 	if !dist.Installed(engName, version) {
 		return fmt.Errorf("engine %s@%s is not installed; run: dbpod engine install %s@%s", engName, version, engName, version)
 	}
@@ -81,7 +81,7 @@ func runInstanceExec(engName, version, dataDir string, rest []string) error {
 	if binary == "" {
 		_, binary, _ = eng.BinaryNames()
 		if dataDir != "" { // instance target: pre-wire root@socket connection
-			rest = append(eng.ClientArgs(engine.Options{DataDir: dataDir}), rest...)
+			rest = append(eng.ClientArgs(engine.Options{DataDir: dataDir, Port: port}), rest...)
 		}
 	}
 
@@ -93,8 +93,9 @@ func runInstanceExec(engName, version, dataDir string, rest []string) error {
 	proc := exec.Command(binPath, rest...)
 	proc.Dir = base // cwd = basedir: "bin/mysql" style paths work
 	// prepend the engine exec paths so the child (and tools it spawns)
-	// resolves bare binary names the same way
-	proc.Env = append(os.Environ(),
+	// resolves bare binary names the same way, plus engine-specific vars
+	// (e.g. LD_LIBRARY_PATH for PGDG-extracted linux binaries)
+	proc.Env = append(append(os.Environ(), eng.Env(engine.Options{DataDir: dataDir})...),
 		"PATH="+prependPaths(base, eng.ExecPaths())+string(filepath.ListSeparator)+os.Getenv("PATH"))
 	proc.Stdin = os.Stdin
 	proc.Stdout = os.Stdout
@@ -111,21 +112,21 @@ func runInstanceExec(engName, version, dataDir string, rest []string) error {
 // resolveExecTarget maps the first exec argument to engine@version plus the
 // instance datadir ("" for a bare engine target): engine ids are tried
 // first, then instance ids; anything else errors with a hint for both forms.
-func resolveExecTarget(id string) (engName, version, dataDir string, err error) {
+func resolveExecTarget(id string) (engName, version string, port int, dataDir string, err error) {
 	if ref, perr := dist.ParseRef(id); perr == nil {
 		if v, rerr := resolveVersion(ref); rerr == nil && dist.Installed(ref.Engine, v) {
-			return ref.Engine, v, "", nil
+			return ref.Engine, v, 0, "", nil
 		}
 		if r, serr := instanceGet(id); serr == nil {
-			return r.Engine, r.Version, r.DataDir, nil
+			return r.Engine, r.Version, r.Port, r.DataDir, nil
 		}
-		return "", "", "", fmt.Errorf("engine %q is not installed; run: dbpod engine install %s", id, id)
+		return "", "", 0, "", fmt.Errorf("engine %q is not installed; run: dbpod engine install %s", id, id)
 	}
 	r, serr := instanceGet(id)
 	if serr == nil {
-		return r.Engine, r.Version, r.DataDir, nil
+		return r.Engine, r.Version, r.Port, r.DataDir, nil
 	}
-	return "", "", "", fmt.Errorf("%q is neither an installed engine (e.g. mysql@8.0.46) nor a known instance (see `dbpod ps`)", id)
+	return "", "", 0, "", fmt.Errorf("%q is neither an installed engine (e.g. mysql@8.0.46) nor a known instance (see `dbpod ps`)", id)
 }
 
 // hasExecutable reports whether arg names an executable shipped with the

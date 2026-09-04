@@ -62,6 +62,11 @@ type Engine interface {
 	// ExecArgs builds the client command line to run inline SQL (-e).
 	// SQL files are executed via client stdin.
 	ExecArgs(opts Options, inlineSQL string) []string
+
+	// Env returns additional environment variables the engine needs for
+	// every process it spawns (server, init and client tools), e.g.
+	// LD_LIBRARY_PATH for engines with bundled shared libraries.
+	Env(opts Options) []string
 }
 
 // registry holds the known engines.

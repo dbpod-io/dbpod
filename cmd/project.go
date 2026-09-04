@@ -123,7 +123,7 @@ var projectCmds = []*cobra.Command{
 				}
 				instanceMarkInitialized(record)
 			}
-			printStatus(record.DataDir)
+			printStatus()
 			return nil
 		},
 	},
@@ -211,8 +211,9 @@ var projectCmds = []*cobra.Command{
 		},
 	},
 	{
-		Use:   "exec [name] [binary] [args...]",
-		Short: "Run a binary from a project instance's engine (defaults to the only one)",
+		Use:                "exec [name] [binary] [args...]",
+		Short:              "Run a binary from a project instance's engine (defaults to the only one)",
+		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true}, // passthrough args may start with '-'
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := defaultProjectInstance(args)
 			if err != nil {
@@ -222,7 +223,7 @@ var projectCmds = []*cobra.Command{
 			if len(rest) > 0 && rest[0] == r.Name {
 				rest = rest[1:] // explicit instance selector consumed
 			}
-			return runInstanceExec(r.Engine, r.Version, r.DataDir, rest)
+			return runInstanceExec(r.Engine, r.Version, r.Port, r.DataDir, rest)
 		},
 	},
 }

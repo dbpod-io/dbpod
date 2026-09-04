@@ -137,8 +137,8 @@ go run ./cmd/metadata-gen        # 更新 internal/metadata/data/mysql.json
    `fetched_at` 距今 **不超过 24 小时** 且来源与当前 `--mirror` 一致 → 直接使用
 2. 缓存过期/缺失 → 若配置了 mirror 先试 `<mirror>/mysql.json`（无元数据则报错并
    视为不可用），再依次尝试仓库 CDN：
-   `https://cdn.jsdelivr.net/gh/shapled/dbpod@main/internal/metadata/data/mysql.json`
-   → `https://raw.githubusercontent.com/shapled/dbpod/main/internal/metadata/data/mysql.json`，
+   `https://cdn.jsdelivr.net/gh/shapled/dbpod@master/internal/metadata/data/mysql.json`
+   → `https://raw.githubusercontent.com/shapled/dbpod/master/internal/metadata/data/mysql.json`，
    成功后写入本地缓存
 3. 网络不可达 → 使用**编译时嵌入二进制**的元数据（`go:embed`），离线可用
 

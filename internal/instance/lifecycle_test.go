@@ -63,6 +63,8 @@ func (f *fakeEngine) ClientArgs(opts engine.Options) []string { return nil }
 
 func (f *fakeEngine) ExecArgs(opts engine.Options, inlineSQL string) []string { return nil }
 
+func (f *fakeEngine) Env(opts engine.Options) []string { return nil }
+
 func init() { engine.Register(&fakeEngine{}) }
 
 // mysqldScript writes its pid to --pid-file, then sleeps until TERMed.

@@ -272,7 +272,9 @@ func gracefulStop(r *Record) error {
 		_, _, admin := eng.BinaryNames()
 		if adminPath, err := engineBin(r.Engine, r.Version, admin); err == nil {
 			opts := engine.Options{DataDir: r.DataDir, Port: r.Port, BinDir: filepath.Dir(adminPath)}
-			if err := exec.Command(adminPath, eng.ShutdownArgs(opts)...).Run(); err == nil {
+			admin := exec.Command(adminPath, eng.ShutdownArgs(opts)...)
+			admin.Env = append(os.Environ(), eng.Env(opts)...)
+			if err := admin.Run(); err == nil {
 				if err := waitExit(r.PID, 30*time.Second); err == nil {
 					return nil
 				}

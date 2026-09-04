@@ -18,6 +18,7 @@ type Package struct {
 	FallbackURL string `json:"fallback_url,omitempty"` // file endpoint if CDN rule misses
 	Size        int64  `json:"size_bytes,omitempty"`
 	MD5         string `json:"md5,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`     // engines with sha256-published checksums (e.g. EDB)
 	OS          string `json:"os"`                   // darwin | linux | windows
 	Arch        string `json:"arch"`                 // amd64 | arm64
 	OSVersion   string `json:"os_version,omitempty"` // e.g. "macos15", "glibc2.28"
@@ -25,6 +26,21 @@ type Package struct {
 	Variant     string `json:"variant,omitempty"`    // "" | minimal | test | debug-test | debug
 	Source      string `json:"source"`               // ga | archive
 	Description string `json:"description,omitempty"`
+
+	// PGDG linux pipeline (non-mysql engines): companion archives extracted
+	// alongside the main one, and prefix-mapping rules applied during
+	// extraction (srcPrefix → dstPrefix).
+	DepURLs      []DepArchive `json:"dep_urls,omitempty"`
+	ExtractRules [][2]string  `json:"extract_rules,omitempty"`
+	RootDir      string       `json:"root_dir,omitempty"` // top-level dir containing bin/ (empty: auto-detect)
+}
+
+// DepArchive is a companion archive (e.g. a runtime-dependency .deb)
+// downloaded and extracted together with the main package.
+type DepArchive struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256,omitempty"`
+	Kind   string `json:"kind"` // deb | rpm
 }
 
 // VersionInfo holds everything known about one engine version.

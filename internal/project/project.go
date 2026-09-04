@@ -40,6 +40,13 @@ func VersionsDir() (string, error) {
 	return filepath.Join(h, "versions"), nil
 }
 
+// VersionsDirMust is VersionsDir without error handling (empty string on
+// failure) — used where the caller only needs a best-effort comparison.
+func VersionsDirMust() string {
+	dir, _ := VersionsDir()
+	return dir
+}
+
 // InstancesDir returns the global directory holding instance datadirs
 // (DBPOD_INSTANCES_DIR overrides the default <DBPOD_HOME>/instances).
 func InstancesDir() (string, error) {
