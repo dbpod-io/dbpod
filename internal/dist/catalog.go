@@ -76,8 +76,7 @@ func Catalogs() []Catalog {
 func ResolveVersion(engine, version, mirror string) (string, error) {
 	cat, err := CatalogFor(engine)
 	if err != nil {
-		// engine without a catalog (e.g. not yet wired): pass through
-		return version, nil
+		return "", err
 	}
 	return cat.ResolveVersion(version, mirror)
 }

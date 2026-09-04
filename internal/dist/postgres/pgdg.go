@@ -69,10 +69,6 @@ func majorOf(version string) string {
 	return version
 }
 
-// isCalendarMajor is always false for PostgreSQL: PG majors (10..18) are
-// traditional versioned majors, not calendar-versioned ones.
-func isCalendarMajor(major string) bool { return false }
-
 // resolvePGDG returns the linux package of a PG version, choosing the
 // baseline with the lowest glibc that carries the version.
 func resolvePGDG(version string) (*metadata.Package, error) {
@@ -84,7 +80,7 @@ func resolvePGDG(version string) (*metadata.Package, error) {
 		if err != nil || len(debs) == 0 {
 			continue
 		}
-		return debPackage(version, b.Dir, debs, rpmExtractRules(major))
+		return archivePackage(version, b.Dir, debs, rpmExtractRules(major))
 	}
 
 	// apt baselines as fallback (bookworm → noble)
@@ -93,7 +89,7 @@ func resolvePGDG(version string) (*metadata.Package, error) {
 		if err != nil || len(debs) == 0 {
 			continue
 		}
-		return debPackage(version, b.Codename, debs, debExtractRules(major))
+		return archivePackage(version, b.Codename, debs, debExtractRules(major))
 	}
 	return nil, fmt.Errorf("no PGDG baseline carries postgres %s", major)
 }
@@ -109,9 +105,10 @@ func pickBaseline(version string) (*yumBaseline, error) {
 	return nil, fmt.Errorf("no PGDG yum baseline carries postgres %s", major)
 }
 
-// debPackage assembles the metadata.Package for a set of .deb downloads.
-// debs[0] is the main archive; the rest ride along as dependencies.
-func debPackage(version, baseline string, debs []debRef, rules [][2]string) (*metadata.Package, error) {
+// archivePackage assembles the metadata.Package for a set of archive
+// downloads (.deb or .rpm); debs[0] is the main archive, the rest ride
+// along as dependencies.
+func archivePackage(version, baseline string, debs []archiveRef, rules [][2]string) (*metadata.Package, error) {
 	pkg := &metadata.Package{
 		Filename:     fmt.Sprintf("postgresql-%s-pgdg-%s", version, baseline),
 		URL:          debs[0].URL,
@@ -149,13 +146,13 @@ func rpmExtractRules(major string) [][2]string {
 // --- apt (Packages.gz) ------------------------------------------------------
 
 // debRef is one .deb resolved from a Packages index.
-type debRef struct {
+type archiveRef struct {
 	URL string
 }
 
 // aptResolve resolves the server+client .deb URLs of a PG major in the
 // given codename baseline.
-func aptResolve(major, codename string) ([]debRef, error) {
+func aptResolve(major, codename string) ([]archiveRef, error) {
 	data, err := fetchAndDecompress(fmt.Sprintf("%s/dists/%s-pgdg/main/binary-amd64/Packages.gz", pgdgBase, codename))
 	if err != nil {
 		return nil, err
@@ -163,7 +160,7 @@ func aptResolve(major, codename string) ([]debRef, error) {
 	server := fmt.Sprintf("postgresql-%s", major)
 	client := fmt.Sprintf("postgresql-client-%s", major)
 	want := map[string]bool{server: true, client: true}
-	found := map[string]debRef{}
+	found := map[string]archiveRef{}
 
 	for _, block := range strings.Split(string(data), "\n\n") {
 		name, file := "", ""
@@ -181,10 +178,10 @@ func aptResolve(major, codename string) ([]debRef, error) {
 			continue
 		}
 		if found[name].URL == "" {
-			found[name] = debRef{URL: pgdgBase + "/" + file}
+			found[name] = archiveRef{URL: pgdgBase + "/" + file}
 		}
 	}
-	var out []debRef
+	var out []archiveRef
 	for _, n := range []string{server, client} {
 		ref, ok := found[n]
 		if !ok {
@@ -263,7 +260,7 @@ type primaryIndex struct {
 
 // yumResolve resolves the server+client rpm URLs of a PG major in an EL
 // baseline (e.g. "el7").
-func yumResolve(major, baseline string) ([]debRef, error) {
+func yumResolve(major, baseline string) ([]archiveRef, error) {
 	server := fmt.Sprintf("postgresql-%s", major)
 	client := fmt.Sprintf("postgresql-client-%s", major)
 
@@ -278,7 +275,7 @@ func yumResolve(major, baseline string) ([]debRef, error) {
 			found[p.Name] = p
 		}
 	}
-	var out []debRef
+	var out []archiveRef
 	for _, n := range []string{server, client} {
 		p, ok := found[n]
 		if !ok {
@@ -289,7 +286,7 @@ func yumResolve(major, baseline string) ([]debRef, error) {
 			loc = yumBase + "/" + strings.TrimPrefix(loc, "../")
 			loc = strings.Replace(loc, "/redhat/../", "/", 1)
 		}
-		out = append(out, debRef{URL: loc})
+		out = append(out, archiveRef{URL: loc})
 	}
 	return out, nil
 }
@@ -333,23 +330,6 @@ func yumHasMajor(baseline, major string) bool {
 		}
 	}
 	return false
-}
-
-// yumMajorsForBaseline lists the PG majors available for an EL baseline by
-// probing each known major's repodata.
-func yumMajorsForBaseline(baseline string) []string {
-	var majors []string
-	for maj := 9; maj <= 18; maj++ {
-		url := fmt.Sprintf("%s/%d/redhat/%s/repodata/repomd.xml", yumBase, maj, baseline)
-		resp, err := httpClient.Head(url)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				majors = append(majors, fmt.Sprint(maj))
-			}
-		}
-	}
-	return majors
 }
 
 // yumPrimaryPackages fetches and parses the primary index of the repo that
