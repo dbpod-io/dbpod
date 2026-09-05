@@ -211,10 +211,15 @@ var projectCmds = []*cobra.Command{
 		},
 	},
 	{
-		Use:                "exec [name] [binary] [args...]",
-		Short:              "Run a binary from a project instance's engine (defaults to the only one)",
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true}, // passthrough args may start with '-'
+		Use:   "exec [name] [binary] [args...]",
+		Short: "Run a binary from a project instance's engine (defaults to the only one)",
+		// passthrough: everything after `exec` belongs to the executed
+		// binary, so args like `-c "SELECT 1"` must survive untouched
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+				return cmd.Help()
+			}
 			r, err := defaultProjectInstance(args)
 			if err != nil {
 				return err
@@ -258,16 +263,6 @@ func init() {
 			c.Flags().BoolVarP(&forceFlag, "force", "f", false, "skip confirmation")
 		}
 		projectCmd.AddCommand(c)
-	}
-	// the project logs proxy shares the global -f flag; the exec proxy
-	// passes everything after the binary through untouched
-	for _, c := range projectCmd.Commands() {
-		switch c.Name() {
-		case "logs":
-			c.Flags().BoolVarP(&followLogs, "follow", "f", false, "follow log output")
-		case "exec":
-			c.Flags().SetInterspersed(false)
-		}
 	}
 	rootCmd.AddCommand(projectCmd)
 }

@@ -3,17 +3,18 @@
 package dist
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/shapled/dbpod/internal/fetch"
 	"github.com/shapled/dbpod/internal/project"
 )
 
@@ -184,11 +185,11 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 		return nil
 	}
 
-	cat, err := CatalogFor(ref.Engine)
+	prov, err := ProviderFor(ref.Engine)
 	if err != nil {
 		return err
 	}
-	version, err := cat.ResolveVersion(ref.Version, mirror)
+	version, err := prov.ResolveVersion(ref.Version, mirror)
 	if err != nil {
 		return err
 	}
@@ -198,20 +199,22 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 		return nil
 	}
 
-	pkg, err := cat.Resolve(ref.Version, runtime.GOOS, runtime.GOARCH, mirror)
+	plan, err := prov.ResolveDownload(ref.Version, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
 	}
-	url := pkg.URL
-	fmt.Fprintf(stdout, "resolved %s -> %s (%s)\n", ref, ref.Version, pkg.Filename)
+	main := plan.Main
+	url := main.URL
+	mainFallback := main.FallbackURL
+	fmt.Fprintf(stdout, "resolved %s -> %s (%s)\n", ref, ref.Version, filepath.Base(url))
 	fmt.Fprintf(stdout, "downloading %s\n", url)
 
-	archive, err := download(url, pkg.MD5, pkg.Size, stdout)
-	if err != nil && pkg.FallbackURL != "" && pkg.FallbackURL != url {
+	archive, err := fetchDownload(url, main.MD5, main.Size, stdout)
+	if err != nil && mainFallback != "" && mainFallback != url {
 		// old releases vanish from the GA CDN but stay on the archives
 		// endpoints — retry with the recorded fallback
-		fmt.Fprintf(stdout, "primary failed (%v); trying fallback %s\n", err, pkg.FallbackURL)
-		archive, err = download(pkg.FallbackURL, pkg.MD5, 0, stdout) // fallback size unknown
+		fmt.Fprintf(stdout, "primary failed (%v); trying fallback %s\n", err, mainFallback)
+		archive, err = fetchDownload(mainFallback, main.MD5, 0, stdout) // fallback size unknown
 	}
 	if err != nil {
 		return err
@@ -232,9 +235,9 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 	// PGDG-style packages: companion dependency archives (shared libs) are
 	// downloaded and extracted alongside the main archive
 	var depArchives []string
-	for i, dep := range pkg.DepURLs {
-		fmt.Fprintf(stdout, "downloading dependency %d/%d: %s\n", i+1, len(pkg.DepURLs), dep.URL)
-		depPath, derr := download(dep.URL, "", 0, io.Discard)
+	for i, dep := range plan.Deps {
+		fmt.Fprintf(stdout, "downloading dependency %d/%d: %s\n", i+1, len(plan.Deps), dep.URL)
+		depPath, derr := fetchDownload(dep.URL, "", 0, io.Discard)
 		if derr != nil {
 			return derr
 		}
@@ -247,20 +250,20 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 
 	// deb/rpm pipelines extract with prefix-mapping rules (bin/lib/share/
 	// shared_libs); regular archives use the generic extractor
-	if pkg.Kind == "deb" || pkg.Kind == "rpm" {
-		if err := extractEnginePackage(pkg.Kind, archive, depArchives, base, pkg.ExtractRules); err != nil {
+	if main.Kind == "deb" || main.Kind == "rpm" {
+		if err := extractEnginePackage(main.Kind, archive, depArchives, base, main.ExtractRules); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "installed %s\n", ref)
 		return nil
 	}
 
-	rel, err := extract(pkg.Kind, archive, base)
+	rel, err := extract(main.Kind, archive, base)
 	if err != nil {
 		return err
 	}
-	if pkg.RootDir != "" { // explicit root hint wins over /bin/ probing
-		rel = pkg.RootDir
+	if main.RootDir != "" { // explicit root hint wins over /bin/ probing
+		rel = main.RootDir
 	}
 	if err := os.WriteFile(filepath.Join(base, ".dbpod-root"), []byte(rel+"\n"), 0o644); err != nil {
 		return err
@@ -286,64 +289,44 @@ func clearQuarantine(base string) error {
 	return exec.Command("xattr", "-rd", "com.apple.quarantine", base).Run()
 }
 
-// download fetches url to a temp file, verifying MD5 when known. Page-listed
-// sizes are display-rounded and only used for progress display.
-func download(url, md5sum string, size int64, stdout io.Writer) (string, error) {
+// fetchDownload retrieves url through the fetch layer (scheme routing,
+// proxy, audit) into a temp file, showing progress and verifying MD5.
+func fetchDownload(url, md5sum string, size int64, stdout io.Writer) (string, error) {
 	tmp, err := os.CreateTemp("", "dbpod-download-*")
 	if err != nil {
 		return "", err
 	}
 	defer tmp.Close()
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download %s: unexpected status %d", url, resp.StatusCode)
-	}
 	if size == 0 {
-		size = resp.ContentLength
+		size = -1
 	}
+	fetch.SetProgressHook(func(n int64) {
+		if size > 0 {
+			fmt.Fprintf(stdout, "\r  %d / %d MB (%d%%)", n>>20, size>>20, n*100/size)
+		} else {
+			fmt.Fprintf(stdout, "\r  %d MB", n>>20)
+		}
+	})
+	defer fetch.SetProgressHook(nil)
 
-	h := md5.New()
-	var got int64
-	lastMB := int64(-1)
-	buf := make([]byte, 1<<20)
-	for {
-		n, err := resp.Body.Read(buf)
-		got += int64(n)
-		if n > 0 {
-			if _, werr := tmp.Write(buf[:n]); werr != nil {
-				return "", werr
-			}
-			h.Write(buf[:n])
-			if mb := got >> 20; mb != lastMB { // print on MB change only
-				lastMB = mb
-				if size > 0 {
-					fmt.Fprintf(stdout, "\r  %d / %d MB (%d%%)", mb, size>>20, got*100/size)
-				} else {
-					fmt.Fprintf(stdout, "\r  %d MB", mb)
-				}
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", err
-		}
+	if _, err := fetch.Fetch(context.Background(), url, tmp.Name()); err != nil {
+		return "", err
 	}
 	fmt.Fprintln(stdout)
 
-	// note: page-listed sizes are display-rounded, so only the MD5 from the
-	// same page is an authoritative integrity check.
+	// page-listed sizes are display-rounded; the MD5 from the same page is
+	// the authoritative integrity check.
 	if md5sum != "" {
+		f, err := os.Open(tmp.Name())
+		if err != nil {
+			return "", err
+		}
+		defer f.Close()
+		h := md5.New()
+		if _, err := io.Copy(h, f); err != nil {
+			return "", err
+		}
 		sum := hex.EncodeToString(h.Sum(nil))
 		if sum != strings.ToLower(md5sum) {
 			return "", fmt.Errorf("md5 mismatch: got %s, want %s", sum, md5sum)

@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 
+	"github.com/shapled/dbpod/internal/globalconfig"
 	"github.com/shapled/dbpod/internal/instance"
 	"github.com/spf13/cobra"
 )
@@ -32,6 +33,10 @@ func Execute() {
 	// to start)
 	if len(os.Args) < 2 || os.Args[1] != "monitor" {
 		instance.Reap(os.Stderr)
+	}
+	// apply global config (network proxy) before any command runs
+	if cfg, err := globalconfig.Load(); err == nil {
+		cfg.Apply()
 	}
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

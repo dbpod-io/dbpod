@@ -183,8 +183,8 @@ func runEngineLs() error {
 	// merge every engine catalog + local-only installs into the entry universe
 	var entries []lsEntry
 	seen := map[string]bool{}
-	for _, cat := range dist.Catalogs() {
-		ix, err := cat.EnsureVersions(mirror)
+	for _, cat := range dist.Providers() {
+		ix, err := cat.EnsureVersions()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "note: cannot fetch %s versions: %v\n", cat.Engine(), err)
 			continue
@@ -217,7 +217,7 @@ func runEngineLs() error {
 		})
 		for i := range catEntries {
 			e := catEntries[i]
-			catEntries[i].Series = cat.SeriesOf(e.Version, e.LTS, i == 0)
+			catEntries[i].Series = strings.Join(cat.SeriesOf(e.Version, e.LTS, i == 0), " / ")
 		}
 		entries = append(entries, catEntries...)
 	}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shapled/dbpod/internal/dist"
 	"github.com/shapled/dbpod/internal/metadata"
 	"github.com/ulikunitz/xz"
 )
@@ -69,9 +70,9 @@ func majorOf(version string) string {
 	return version
 }
 
-// resolvePGDG returns the linux package of a PG version, choosing the
+// resolvePGDG returns the linux DownloadPlan of a PG version, choosing the
 // baseline with the lowest glibc that carries the version.
-func resolvePGDG(version string) (*metadata.Package, error) {
+func resolvePGDG(version string) (dist.DownloadPlan, error) {
 	major := majorOf(version)
 
 	// yum baselines first (lowest glibc: el7 → el8 → el9)
@@ -91,7 +92,7 @@ func resolvePGDG(version string) (*metadata.Package, error) {
 		}
 		return archivePackage(version, b.Codename, debs, debExtractRules(major))
 	}
-	return nil, fmt.Errorf("no PGDG baseline carries postgres %s", major)
+	return dist.DownloadPlan{}, fmt.Errorf("no PGDG baseline carries postgres %s", major)
 }
 
 // pickBaseline selects the lowest-glibc baseline carrying the PG major.
@@ -105,21 +106,23 @@ func pickBaseline(version string) (*yumBaseline, error) {
 	return nil, fmt.Errorf("no PGDG yum baseline carries postgres %s", major)
 }
 
-// archivePackage assembles the metadata.Package for a set of archive
+// archivePackage assembles the linux DownloadPlan for a set of archive
 // downloads (.deb or .rpm); debs[0] is the main archive, the rest ride
 // along as dependencies.
-func archivePackage(version, baseline string, debs []archiveRef, rules [][2]string) (*metadata.Package, error) {
-	pkg := &metadata.Package{
-		Filename:     fmt.Sprintf("postgresql-%s-pgdg-%s", version, baseline),
-		URL:          debs[0].URL,
-		Kind:         "deb",
-		OS:           "linux",
-		ExtractRules: rules,
+func archivePackage(version, baseline string, debs []archiveRef, rules [][2]string) (dist.DownloadPlan, error) {
+	plan := dist.DownloadPlan{Version: version}
+	for i, d := range debs {
+		f := dist.DownloadFile{
+			URL:  d.URL,
+			Kind: "deb",
+		}
+		if i == 0 {
+			f.ExtractRules = rules
+		} else {
+			plan.Deps = append(plan.Deps, f)
+		}
 	}
-	for _, d := range debs[1:] {
-		pkg.DepURLs = append(pkg.DepURLs, metadata.DepArchive{URL: d.URL, Kind: "deb"})
-	}
-	return pkg, nil
+	return plan, nil
 }
 
 // debExtractRules maps Debian paths into the portable engine layout.
