@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/flosch/pongo2/v7"
-	"github.com/shapled/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/engine"
 )
 
 //go:embed templates/*.tmpl

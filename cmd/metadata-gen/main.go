@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/shapled/dbpod/internal/metadata"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 )
 
 func main() {

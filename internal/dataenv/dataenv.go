@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shapled/dbpod/internal/project"
+	"github.com/dbpod-io/dbpod/internal/project"
 )
 
 // Env describes one data environment.

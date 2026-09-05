@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shapled/dbpod/internal/dist"
-	"github.com/shapled/dbpod/internal/metadata"
+	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 )
 
 // MysqlProvider is the builtin distribution provider for MySQL: version

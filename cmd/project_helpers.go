@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shapled/dbpod/internal/config"
-	"github.com/shapled/dbpod/internal/dist"
-	"github.com/shapled/dbpod/internal/engine"
-	"github.com/shapled/dbpod/internal/instance"
+	"github.com/dbpod-io/dbpod/internal/config"
+	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/instance"
 )
 
 func engineGet(name string) (engine.Engine, error) {

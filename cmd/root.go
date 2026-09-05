@@ -3,8 +3,8 @@ package cmd
 import (
 	"os"
 
-	"github.com/shapled/dbpod/internal/globalconfig"
-	"github.com/shapled/dbpod/internal/instance"
+	"github.com/dbpod-io/dbpod/internal/globalconfig"
+	"github.com/dbpod-io/dbpod/internal/instance"
 	"github.com/spf13/cobra"
 )
 

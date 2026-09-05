@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shapled/dbpod/internal/engine"
-	"github.com/shapled/dbpod/internal/project"
+	"github.com/dbpod-io/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/project"
 )
 
 // fakeEngine simulates a database engine: its "mysqld" is a shell script

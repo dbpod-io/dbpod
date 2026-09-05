@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shapled/dbpod/internal/config"
-	"github.com/shapled/dbpod/internal/dataenv"
-	"github.com/shapled/dbpod/internal/instance"
+	"github.com/dbpod-io/dbpod/internal/config"
+	"github.com/dbpod-io/dbpod/internal/dataenv"
+	"github.com/dbpod-io/dbpod/internal/instance"
 	"github.com/spf13/cobra"
 )
 

@@ -2,7 +2,7 @@ package dist
 
 import (
 	"fmt"
-	"github.com/shapled/dbpod/internal/metadata"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 	"os"
 	"sort"
 )

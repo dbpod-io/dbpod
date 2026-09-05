@@ -14,11 +14,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/shapled/dbpod/internal/dataenv"
-	"github.com/shapled/dbpod/internal/dist"
-	"github.com/shapled/dbpod/internal/engine"
-	"github.com/shapled/dbpod/internal/instance"
-	"github.com/shapled/dbpod/internal/project"
+	"github.com/dbpod-io/dbpod/internal/dataenv"
+	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/instance"
+	"github.com/dbpod-io/dbpod/internal/project"
 	"github.com/spf13/cobra"
 )
 

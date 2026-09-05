@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shapled/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/engine"
 )
 
 func testOpts(root string, port int) engine.Options {

@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shapled/dbpod/internal/dist"
-	"github.com/shapled/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/engine"
 )
 
 // RunMonitor is the per-instance supervisor (conmon-style): it spawns the

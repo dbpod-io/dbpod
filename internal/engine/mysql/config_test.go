@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shapled/dbpod/internal/engine"
-	"github.com/shapled/dbpod/internal/project"
+	"github.com/dbpod-io/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/project"
 )
 
 func TestWriteConfigRendersTemplate(t *testing.T) {

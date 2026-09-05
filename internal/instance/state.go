@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shapled/dbpod/internal/project"
+	"github.com/dbpod-io/dbpod/internal/project"
 )
 
 // Record is the persisted state of one instance.

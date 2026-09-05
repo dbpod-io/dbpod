@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shapled/dbpod/internal/dist"
-	"github.com/shapled/dbpod/internal/metadata"
+	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 )
 
 // Provider implements dist.Provider for PostgreSQL: the version list comes

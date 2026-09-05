@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shapled/dbpod/internal/dist"
-	"github.com/shapled/dbpod/internal/metadata"
+	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 	"github.com/ulikunitz/xz"
 )
 

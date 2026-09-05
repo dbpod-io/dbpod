@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shapled/dbpod/internal/dist"
-	"github.com/shapled/dbpod/internal/instance"
+	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/instance"
 	"github.com/spf13/cobra"
 )
 

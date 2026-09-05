@@ -16,7 +16,7 @@ import (
 // metadata was fetched from (official: cdn.mysql.com/Downloads, mirror: the
 // mirror base).
 const (
-	repoOwner  = "shapled"
+	repoOwner  = "dbpod-io"
 	repoName   = "dbpod"
 	repoBranch = "master"
 	repoPath   = "internal/metadata/data/mysql.json"

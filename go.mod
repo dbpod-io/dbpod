@@ -1,4 +1,4 @@
-module github.com/shapled/dbpod
+module github.com/dbpod-io/dbpod
 
 go 1.27.0
 

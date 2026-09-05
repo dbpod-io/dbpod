@@ -76,7 +76,7 @@ func Save(dir string, c *Config) error {
 	if err != nil {
 		return err
 	}
-	header := "# dbpod declarative database environment\n# docs: https://github.com/shapled/dbpod\n"
+	header := "# dbpod declarative database environment\n# docs: https://github.com/dbpod-io/dbpod\n"
 	return os.WriteFile(filepath.Join(dir, FileName), append([]byte(header), data...), 0o644)
 }
 

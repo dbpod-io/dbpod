@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/shapled/dbpod/internal/fetch"
-	"github.com/shapled/dbpod/internal/project"
+	"github.com/dbpod-io/dbpod/internal/fetch"
+	"github.com/dbpod-io/dbpod/internal/project"
 	"gopkg.in/yaml.v3"
 )
 

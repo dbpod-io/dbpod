@@ -3,7 +3,7 @@ package mysql
 import (
 	"testing"
 
-	"github.com/shapled/dbpod/internal/metadata"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 )
 
 func TestMysqlCatalogResolveVersion(t *testing.T) {

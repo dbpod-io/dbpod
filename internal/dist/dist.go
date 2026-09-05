@@ -14,8 +14,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/shapled/dbpod/internal/fetch"
-	"github.com/shapled/dbpod/internal/project"
+	"github.com/dbpod-io/dbpod/internal/fetch"
+	"github.com/dbpod-io/dbpod/internal/project"
 )
 
 // PackageRef identifies an engine@version spec from the CLI (e.g. "mysql@8.0.35").
