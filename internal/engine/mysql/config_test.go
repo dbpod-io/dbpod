@@ -26,15 +26,6 @@ func TestWriteConfigRendersTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// seeded global template
-	tplDir, err := project.TemplatesDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(tplDir, "mysql.cnf.tmpl")); err != nil {
-		t.Fatalf("global template not seeded: %v", err)
-	}
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +50,23 @@ func TestWriteConfigRendersTemplate(t *testing.T) {
 			t.Errorf("directory %s not created", d)
 		}
 	}
+
+	// the .example reference mirrors the current default, but no live
+	// template is materialized
+	tplDir, err := project.TemplatesDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	example, err := os.ReadFile(filepath.Join(tplDir, "mysql.cnf.tmpl.example"))
+	if err != nil {
+		t.Fatalf("example reference not written: %v", err)
+	}
+	if string(example) != DefaultProfile().Config {
+		t.Errorf("example does not mirror the default template")
+	}
+	if _, err := os.Stat(filepath.Join(tplDir, "mysql.cnf.tmpl")); !os.IsNotExist(err) {
+		t.Errorf("live template must not be materialized: %v", err)
+	}
 }
 
 func TestWriteConfigHonorsGlobalOverride(t *testing.T) {
@@ -70,12 +78,11 @@ func TestWriteConfigHonorsGlobalOverride(t *testing.T) {
 		DataDir: root,
 		Port:    3307,
 	}
-	// first call seeds the template
-	if _, err := e.WriteConfig(opts); err != nil {
+	// the user creates the template file: an explicit customization
+	tplDir, _ := project.TemplatesDir()
+	if err := os.MkdirAll(tplDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// user customizes the global template
-	tplDir, _ := project.TemplatesDir()
 	override := "# my custom header\n[mysqld]\nport = {{ port }}\n"
 	if err := os.WriteFile(filepath.Join(tplDir, "mysql.cnf.tmpl"), []byte(override), 0o644); err != nil {
 		t.Fatal(err)

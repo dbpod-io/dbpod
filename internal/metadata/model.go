@@ -1,12 +1,12 @@
-// Package metadata discovers MySQL engine versions and installable packages
-// from the official web pages, with a 24h incremental local cache.
-//
-// Data sources (see docs/download-link-acquisition.md):
-//   - GA page:    https://dev.mysql.com/downloads/mysql/          (latest series)
-//   - Archive:    https://downloads.mysql.com/archives/community/ (all versions)
+// Package metadata is the runtime consumption side of engine metadata:
+// the data model, the local cache, platform resolution, and the fetch
+// chain (mirror → repository CDN → embedded copy). Generation/crawling
+// lives in the maintainer tools (cmd/metadata-gen for the built-in
+// engines, external engine repos elsewhere).
 package metadata
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -56,17 +56,10 @@ type VersionInfo struct {
 // Index is the persisted metadata cache for one engine.
 type Index struct {
 	Engine    string                  `json:"engine"`
+	Revision  int                     `json:"revision,omitempty"` // content revision, bumped by the generator on regeneration
 	FetchedAt time.Time               `json:"fetched_at"`
 	BaseURL   string                  `json:"base_url,omitempty"` // parent directory of the metadata file; relative package URLs resolve against it
 	Versions  map[string]*VersionInfo `json:"versions"`           // key: full version
-}
-
-// RefreshInterval is how long a cached index stays fresh.
-const RefreshInterval = 24 * time.Hour
-
-// Fresh reports whether the index is younger than RefreshInterval.
-func (ix *Index) Fresh() bool {
-	return !ix.FetchedAt.IsZero() && time.Since(ix.FetchedAt) < RefreshInterval
 }
 
 // DownloadURL resolves the download URL of a package. Absolute URLs are used
@@ -93,4 +86,13 @@ func (ix *Index) ListVersions() []string {
 	}
 	sortVersions(out)
 	return out
+}
+
+// SeriesOf returns the major.minor series of a full version string.
+func SeriesOf(version string) string {
+	var a, b int
+	if n, _ := fmt.Sscanf(version, "%d.%d", &a, &b); n == 2 {
+		return fmt.Sprintf("%d.%d", a, b)
+	}
+	return version
 }

@@ -21,13 +21,14 @@ import (
 
 // Spec describes how to start (or resolve) an instance.
 type Spec struct {
-	Name       string
-	Engine     string // engine name, e.g. "mysql"
-	Version    string // full version
-	DataDir    string // absolute datadir
-	DataEnv    string // optional data environment name
-	Port       int
-	AutoRemove bool // --rm: delete all state when the server stops
+	Name        string
+	Engine      string // engine name, e.g. "mysql"
+	Version     string // full version
+	DataDir     string // absolute datadir
+	DataEnv     string // optional data environment name
+	Port        int
+	BindAddress string // address the server binds ("" = 127.0.0.1)
+	AutoRemove  bool   // --rm: delete all state when the server stops
 }
 
 // engineBin resolves a binary of the record's engine via the dist cache.
@@ -124,10 +125,11 @@ func Start(spec Spec, stdout io.Writer) (*Record, error) {
 		return nil, err
 	}
 	opts := engine.Options{
-		Name:    spec.Name,
-		BinDir:  filepath.Dir(binPath),
-		DataDir: spec.DataDir,
-		Port:    spec.Port,
+		Name:        spec.Name,
+		BinDir:      filepath.Dir(binPath),
+		DataDir:     spec.DataDir,
+		Port:        spec.Port,
+		BindAddress: spec.BindAddress,
 	}
 	if !eng.DataDirInitialized(opts) {
 		fmt.Fprintf(stdout, "initializing data directory %s\n", spec.DataDir)
@@ -144,15 +146,16 @@ func Start(spec Spec, stdout io.Writer) (*Record, error) {
 	}
 
 	record := &Record{
-		Name:       spec.Name,
-		Engine:     spec.Engine,
-		Version:    spec.Version,
-		DataDir:    spec.DataDir,
-		DataEnv:    spec.DataEnv,
-		Port:       spec.Port,
-		AutoRemove: spec.AutoRemove,
-		LogPath:    logPath,
-		CreatedAt:  time.Now(),
+		Name:        spec.Name,
+		Engine:      spec.Engine,
+		Version:     spec.Version,
+		DataDir:     spec.DataDir,
+		DataEnv:     spec.DataEnv,
+		Port:        spec.Port,
+		BindAddress: spec.BindAddress,
+		AutoRemove:  spec.AutoRemove,
+		LogPath:     logPath,
+		CreatedAt:   time.Now(),
 	}
 	if existing != nil {
 		record.CreatedAt = existing.CreatedAt
@@ -177,7 +180,7 @@ func Start(spec Spec, stdout io.Writer) (*Record, error) {
 		_ = record.save()
 	}
 
-	fmt.Fprintf(stdout, "starting %s@%s on 127.0.0.1:%d\n", spec.Engine, spec.Version, spec.Port)
+	fmt.Fprintf(stdout, "starting %s@%s on %s:%d\n", spec.Engine, spec.Version, engine.ConnectHost(spec.BindAddress), spec.Port)
 
 	// wait until the monitor reports the server ready
 	deadline := time.Now().Add(90 * time.Second)
@@ -271,7 +274,7 @@ func gracefulStop(r *Record) error {
 	if eng, err := engine.Get(r.Engine); err == nil {
 		_, _, admin := eng.BinaryNames()
 		if adminPath, err := engineBin(r.Engine, r.Version, admin); err == nil {
-			opts := engine.Options{DataDir: r.DataDir, Port: r.Port, BinDir: filepath.Dir(adminPath)}
+			opts := engine.Options{DataDir: r.DataDir, Port: r.Port, BindAddress: r.BindAddress, BinDir: filepath.Dir(adminPath)}
 			admin := exec.Command(adminPath, eng.ShutdownArgs(opts)...)
 			admin.Env = append(os.Environ(), eng.Env(opts)...)
 			if err := admin.Run(); err == nil {
@@ -322,12 +325,13 @@ func Restart(name string, stdout io.Writer) (*Record, error) {
 		}
 	}
 	return Start(Spec{
-		Name:    r.Name,
-		Engine:  r.Engine,
-		Version: r.Version,
-		DataDir: r.DataDir,
-		DataEnv: r.DataEnv,
-		Port:    r.Port,
+		Name:        r.Name,
+		Engine:      r.Engine,
+		Version:     r.Version,
+		DataDir:     r.DataDir,
+		DataEnv:     r.DataEnv,
+		Port:        r.Port,
+		BindAddress: r.BindAddress,
 	}, stdout)
 }
 

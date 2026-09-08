@@ -1,10 +1,11 @@
-// Command metadata-gen regenerates the engine metadata file shipped inside
-// the dbpod repository (internal/metadata/data/mysql.json) and embedded into
-// the binary at build time.
+// Command metadata-gen regenerates the MySQL metadata file shipped inside
+// the dbpod repository (internal/metadata/data/mysql.json) and embedded
+// into the binary at build time.
 //
-// This is a maintainer tool: it is the only component that crawls the MySQL
-// web pages. Updates are incremental — versions already present in the file
-// are treated as immutable, only new versions are crawled.
+// This is a maintainer tool and the ONLY place where the MySQL web pages
+// are crawled: the crawl/parse pipeline lives here (not in the runtime
+// library). Updates are incremental — versions already present in the
+// file are treated as immutable, only new versions are crawled.
 //
 // Usage:
 //
@@ -18,8 +19,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-
-	"github.com/dbpod-io/dbpod/internal/metadata"
 )
 
 func main() {
@@ -32,7 +31,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: output directory %q not found (run from the repository root)\n", dir)
 		os.Exit(1)
 	}
-	if err := metadata.Generate(dir, "mysql", *concurrency, os.Stdout); err != nil {
+	if err := generate(dir, "mysql", *concurrency, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}

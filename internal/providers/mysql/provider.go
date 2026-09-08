@@ -9,11 +9,10 @@ import (
 	"github.com/dbpod-io/dbpod/internal/metadata"
 )
 
-// MysqlProvider is the builtin distribution provider for MySQL: version
-// discovery crawls the official pages (GA + archives) with a 24h cache.
-type MysqlProvider struct {
-	Source dist.SourceSpec
-}
+// MysqlProvider is the builtin distribution provider for MySQL: versions
+// and packages come from the generated metadata (embedded copy seeded into
+// the configuration directory, refreshed via `registry update`).
+type MysqlProvider struct{}
 
 func (p *MysqlProvider) Engine() string { return "mysql" }
 
@@ -48,7 +47,7 @@ func (p *MysqlProvider) SeriesOf(version string, lts, isLatest bool) []string {
 }
 
 func (p *MysqlProvider) EnsureVersions() (*metadata.Index, error) {
-	return metadata.EnsureVersions("mysql", p.Source.Base)
+	return metadata.EnsureBuiltin("mysql")
 }
 
 func (p *MysqlProvider) ResolveVersion(version, mirror string) (string, error) {
@@ -74,7 +73,7 @@ func (p *MysqlProvider) resolveVersion(version string) (string, error) {
 	if best != "" {
 		return best, nil
 	}
-	ix, err := metadata.EnsureVersions("mysql", "")
+	ix, err := metadata.EnsureBuiltin("mysql")
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve series %q: %w (install a full version, e.g. mysql@8.0.35)", version, err)
 	}
@@ -88,7 +87,7 @@ func (p *MysqlProvider) resolveVersion(version string) (string, error) {
 
 // ResolveDownload returns the package of version for the platform.
 func (p *MysqlProvider) ResolveDownload(version, goos, goarch string) (dist.DownloadPlan, error) {
-	ix, info, err := metadata.EnsurePackages("mysql", version, "")
+	ix, info, err := metadata.EnsurePackages("mysql", version)
 	if err != nil {
 		return dist.DownloadPlan{}, err
 	}

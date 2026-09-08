@@ -37,10 +37,11 @@ func RunMonitor(name string, stdout io.Writer) error {
 		return err
 	}
 	opts := engine.Options{
-		Name:    r.Name,
-		BinDir:  filepath.Dir(binPath),
-		DataDir: r.DataDir,
-		Port:    r.Port,
+		Name:        r.Name,
+		BinDir:      filepath.Dir(binPath),
+		DataDir:     r.DataDir,
+		Port:        r.Port,
+		BindAddress: r.BindAddress,
 	}
 
 	// first start of a fresh datadir

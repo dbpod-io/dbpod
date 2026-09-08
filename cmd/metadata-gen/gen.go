@@ -1,10 +1,11 @@
-package metadata
+package main
 
 import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 	"io"
 	"math/rand"
 	"os"
@@ -21,15 +22,18 @@ import (
 //
 // The existing file is treated as immutable history: only versions missing
 // from it are crawled and merged in (incremental).
-func Generate(dataDir, engine string, concurrency int, stdout io.Writer) error {
+func generate(dataDir, engine string, concurrency int, stdout io.Writer) error {
 	outPath := filepath.Join(dataDir, engine+".json")
 	ix, err := loadGenerated(outPath)
 	if err != nil {
 		return err
 	}
 	if ix == nil {
-		ix = &Index{Engine: engine, Versions: map[string]*VersionInfo{}}
+		ix = &metadata.Index{Engine: engine, Versions: map[string]*metadata.VersionInfo{}}
 	}
+	// every regeneration bumps the content revision: `registry update`
+	// compares revisions to decide whether an update is needed
+	ix.Revision++
 
 	// discover versions (2 requests)
 	opt := FetchOption{}
@@ -49,14 +53,14 @@ func Generate(dataDir, engine string, concurrency int, stdout io.Writer) error {
 			existing.Latest, existing.LTS = true, vi.LTS
 			continue
 		}
-		ix.Versions[vi.Version] = &VersionInfo{Version: vi.Version, Series: vi.Series, LTS: vi.LTS, Latest: true}
+		ix.Versions[vi.Version] = &metadata.VersionInfo{Version: vi.Version, Series: vi.Series, LTS: vi.LTS, Latest: true}
 		pending[vi.Version] = sourceGA
 	}
 	for _, v := range archive {
 		if _, ok := ix.Versions[v]; ok {
 			continue
 		}
-		ix.Versions[v] = &VersionInfo{Version: v, Series: SeriesOf(v)}
+		ix.Versions[v] = &metadata.VersionInfo{Version: v, Series: metadata.SeriesOf(v)}
 		pending[v] = sourceArchive
 	}
 	fmt.Fprintf(stdout, "%d known version(s), %d new to crawl\n", len(ix.Versions), len(pending))
@@ -85,9 +89,9 @@ var pace = func() {
 
 // crawlPackageOne fetches the package list of one version (3 os requests)
 // and returns the number of packages found.
-func crawlPackageOne(ix *Index, version string, src versionSource) (int, error) {
+func crawlPackageOne(ix *metadata.Index, version string, src versionSource) (int, error) {
 	info := ix.Versions[version]
-	var pkgs []Package
+	var pkgs []metadata.Package
 	var err error
 	if src == sourceGA {
 		pkgs, err = FetchGAPackages(info.Series, FetchOption{})
@@ -107,7 +111,7 @@ func crawlPackageOne(ix *Index, version string, src versionSource) (int, error) 
 	return len(pkgs), nil
 }
 
-func crawlPackages(ix *Index, pending map[string]versionSource, engine string, concurrency int, stdout io.Writer) error {
+func crawlPackages(ix *metadata.Index, pending map[string]versionSource, engine string, concurrency int, stdout io.Writer) error {
 	if concurrency <= 0 {
 		concurrency = 8
 	}
@@ -162,7 +166,7 @@ func crawlPackages(ix *Index, pending map[string]versionSource, engine string, c
 }
 
 // loadGenerated reads the repository metadata file (nil when absent).
-func loadGenerated(path string) (*Index, error) {
+func loadGenerated(path string) (*metadata.Index, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -170,14 +174,14 @@ func loadGenerated(path string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	var ix Index
+	var ix metadata.Index
 	if err := json.Unmarshal(data, &ix); err != nil {
 		return nil, fmt.Errorf("corrupt generated metadata %s: %w", path, err)
 	}
 	return &ix, nil
 }
 
-func saveGenerated(path string, ix *Index) error {
+func saveGenerated(path string, ix *metadata.Index) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

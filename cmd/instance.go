@@ -27,6 +27,7 @@ var (
 	runEngine  string
 	runData    string
 	runPort    int
+	runBind    string
 	runRm      bool
 	runDetach  bool
 	runAll     bool
@@ -115,11 +116,12 @@ var startCmd = &cobra.Command{
 				continue
 			}
 			spec := instance.Spec{
-				Name:    r.Name,
-				Engine:  r.Engine,
-				Version: r.Version,
-				DataDir: r.DataDir,
-				Port:    r.Port,
+				Name:        r.Name,
+				Engine:      r.Engine,
+				Version:     r.Version,
+				DataDir:     r.DataDir,
+				Port:        r.Port,
+				BindAddress: r.BindAddress,
 			}
 			if _, err := instance.Start(spec, os.Stdout); err != nil {
 				errs = append(errs, err)
@@ -244,7 +246,7 @@ func printInspectJSON(records []*instance.Record) error {
 		if err != nil {
 			return err
 		}
-		sock := eng.SocketPath(engine.Options{DataDir: r.DataDir, Port: r.Port})
+		sock := eng.SocketPath(engine.Options{DataDir: r.DataDir, Port: r.Port, BindAddress: r.BindAddress})
 		views = append(views, inspectView{
 			Record:   *r,
 			Running:  r.Running(),
@@ -348,11 +350,12 @@ func buildSpec() (*instance.Spec, error) {
 		fmt.Fprintf(os.Stdout, "no --port given, using %d\n", port)
 	}
 	return &instance.Spec{
-		Name:    name,
-		Engine:  ref.Engine,
-		Version: version,
-		DataDir: dataDir,
-		Port:    port,
+		Name:        name,
+		Engine:      ref.Engine,
+		Version:     version,
+		DataDir:     dataDir,
+		Port:        port,
+		BindAddress: runBind,
 	}, nil
 }
 
@@ -462,6 +465,7 @@ func init() {
 	runCmd.Flags().StringVar(&runEngine, "engine", "mysql@8.0", "engine spec <engine>@<version|series>")
 	runCmd.Flags().StringVar(&runData, "data", "", "datadir path (default: <instances-dir>/<name>/data)")
 	runCmd.Flags().IntVar(&runPort, "port", 0, "TCP port (default: a free port)")
+	runCmd.Flags().StringVar(&runBind, "bind", "", "address the server binds (default: 127.0.0.1)")
 	runCmd.Flags().BoolVar(&runRm, "rm", false, "automatically remove the instance when it stops")
 	runCmd.Flags().BoolVarP(&runDetach, "detach", "d", false, "run in the background and return immediately")
 	psCmd.Flags().BoolVarP(&runAll, "all", "a", false, "list all instances, including stopped ones and orphans")

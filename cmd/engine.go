@@ -11,6 +11,7 @@ import (
 
 	"github.com/dbpod-io/dbpod/internal/dist"
 	"github.com/dbpod-io/dbpod/internal/instance"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 	"github.com/spf13/cobra"
 )
 
@@ -109,9 +110,12 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantSeries 
 	var rows []lsRow
 
 	if wantSeries {
-		// collapse into series; each series row = its latest version
+		// collapse into series; each series row = its latest version.
+		// The map key includes the engine: different engines can share
+		// series numbers (mysql 8.0 vs percona 8.0) and must not merge.
 		type series struct {
 			engine    string
+			name      string
 			latest    string
 			latestLT  bool
 			available bool
@@ -119,21 +123,21 @@ func buildLsRows(entries []lsEntry, wantInstalled, wantAll, wantLts, wantSeries 
 		}
 		seriesMap := map[string]*series{}
 		for _, e := range entries {
-			name := e.Series
-			b := seriesMap[name]
+			key := e.Engine + "/" + e.Series
+			b := seriesMap[key]
 			if b == nil {
-				b = &series{engine: e.Engine}
-				seriesMap[name] = b
+				b = &series{engine: e.Engine, name: e.Series}
+				seriesMap[key] = b
 			}
 			if versionLess(b.latest, e.Version) {
 				b.latest, b.latestLT, b.available, b.inst = e.Version, e.LTS, e.Available, e.Installed
 			}
 		}
 		covered := map[string]bool{}
-		for name, b := range seriesMap {
+		for _, b := range seriesMap {
 			rows = append(rows, lsRow{
 				Engine: b.engine,
-				Label:  name + " (" + b.latest + ")", SortVer: b.latest,
+				Label:  b.name + " (" + b.latest + ")", SortVer: b.latest,
 				LTS: b.latestLT, Status: statusOf(b.inst, b.available), Installed: b.inst,
 			})
 			covered[b.latest] = true
@@ -184,6 +188,9 @@ func runEngineLs() error {
 	var entries []lsEntry
 	seen := map[string]bool{}
 	for _, cat := range dist.Providers() {
+		if metadata.Disabled(cat.Engine()) {
+			continue // disabled via `registry disable`: hidden from the catalog
+		}
 		ix, err := cat.EnsureVersions()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "note: cannot fetch %s versions: %v\n", cat.Engine(), err)

@@ -23,6 +23,7 @@ type Record struct {
 	DataDir      string    `json:"data_dir"` // absolute datadir
 	DataEnv      string    `json:"data_env"` // data environment name ("" for raw paths)
 	Port         int       `json:"port"`
+	BindAddress  string    `json:"bind_address,omitempty"` // server bind address ("" = 127.0.0.1)
 	PID          int       `json:"pid"`            // server process (0 = stopped)
 	MonitorPID   int       `json:"monitor_pid"`    // per-instance monitor process (0 = none)
 	LastExitCode int       `json:"last_exit_code"` // exit code of the last server run

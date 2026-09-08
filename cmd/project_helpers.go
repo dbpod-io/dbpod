@@ -16,8 +16,8 @@ func engineGet(name string) (engine.Engine, error) {
 	return engine.Get(name)
 }
 
-func mkOpts(dataDir string, port int, binDir string) engine.Options {
-	return engine.Options{DataDir: dataDir, Port: port, BinDir: binDir}
+func mkOpts(dataDir string, port int, bind, binDir string) engine.Options {
+	return engine.Options{DataDir: dataDir, Port: port, BindAddress: bind, BinDir: binDir}
 }
 
 // projectName derives the project service name: yaml name or dir base.
@@ -158,7 +158,7 @@ func instanceMarkInitialized(r *instance.Record) error {
 }
 
 // importSQL runs SQL files through the engine client.
-func importSQL(engName, version string, files []string, port int) error {
+func importSQL(engName, version string, files []string, port int, bind string) error {
 	eng, err := engineGet(engName)
 	if err != nil {
 		return err
@@ -168,7 +168,7 @@ func importSQL(engName, version string, files []string, port int) error {
 	if err != nil {
 		return err
 	}
-	args := eng.ExecArgs(mkOpts("", port, filepath.Dir(clientPath)), "")
+	args := eng.ExecArgs(mkOpts("", port, bind, filepath.Dir(clientPath)), "")
 	for _, f := range files {
 		fmt.Fprintf(os.Stdout, "importing %s\n", f)
 		if err := importViaClient(clientPath, args, f); err != nil {

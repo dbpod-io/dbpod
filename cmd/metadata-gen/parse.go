@@ -1,7 +1,7 @@
-package metadata
+package main
 
 import (
-	"fmt"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,9 +21,9 @@ var (
 
 // parseGAIndexVersions extracts the latest version series from the GA page.
 // Option values are major.minor, option text is the full version (maybe "x.y.z LTS").
-func parseGAIndexVersions(html string) []VersionInfo {
+func parseGAIndexVersions(html string) []metadata.VersionInfo {
 	sel := extractSelect(html, "version")
-	var out []VersionInfo
+	var out []metadata.VersionInfo
 	for _, m := range reOption.FindAllStringSubmatch(sel, -1) {
 		value, text := m[1], strings.TrimSpace(stripTags(m[2]))
 		lts := strings.HasSuffix(text, "LTS")
@@ -31,7 +31,7 @@ func parseGAIndexVersions(html string) []VersionInfo {
 		if text == "" {
 			continue
 		}
-		out = append(out, VersionInfo{Version: text, Series: value, LTS: lts, Latest: true})
+		out = append(out, metadata.VersionInfo{Version: text, Series: value, LTS: lts, Latest: true})
 	}
 	return out
 }
@@ -71,14 +71,14 @@ var reTagStrip = regexp.MustCompile(`<[^>]*>`)
 // parsePackageRows parses the alternating two-row-per-package table shared by
 // the GA and archive pages: odd rows carry description + download link + size,
 // even rows carry (filename) + MD5.
-func parsePackageRows(html, source string) []Package {
-	var pkgs []Package
+func parsePackageRows(html, source string) []metadata.Package {
+	var pkgs []metadata.Package
 	cur := -1
 	for _, m := range reRow.FindAllStringSubmatch(html, -1) {
 		row := m[1]
 		switch {
 		case strings.Contains(row, "Download</a>") || reGetURL.MatchString(row):
-			p := Package{Source: source}
+			p := metadata.Package{Source: source}
 			if d := reBold.FindStringSubmatch(row); d != nil {
 				p.Description = strings.TrimSpace(stripTags(d[1]))
 			}
@@ -118,7 +118,7 @@ var reKinds = []string{".tar.gz", ".tar.xz", ".tar", ".zip", ".dmg", ".msi", ".d
 
 // applyFilenameInfo derives version/os/arch/kind/variant from the filename
 // (see docs/download-link-acquisition.md §3).
-func applyFilenameInfo(p *Package) {
+func applyFilenameInfo(p *metadata.Package) {
 	name := p.Filename
 	if name == "" {
 		return
@@ -221,13 +221,4 @@ func parseSize(s string) int64 {
 		return 0
 	}
 	return int64(f * mult)
-}
-
-// SeriesOf returns the major.minor series of a full version string.
-func SeriesOf(version string) string {
-	var a, b int
-	if n, _ := fmt.Sscanf(version, "%d.%d", &a, &b); n == 2 {
-		return fmt.Sprintf("%d.%d", a, b)
-	}
-	return version
 }

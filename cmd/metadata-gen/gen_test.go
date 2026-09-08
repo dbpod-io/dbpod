@@ -1,8 +1,11 @@
-package metadata
+package main
 
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -54,4 +57,39 @@ func swapURLs(t *testing.T, srv *httptest.Server) {
 	oldGA, oldArch := gaIndexURL, archiveBaseURL
 	gaIndexURL, archiveBaseURL = srv.URL+"/ga", srv.URL+"/arch"
 	t.Cleanup(func() { gaIndexURL, archiveBaseURL = oldGA, oldArch })
+}
+func TestGenerateIncremental(t *testing.T) {
+	ga := readFixture(t, "ga_index.html")
+	swapURLs(t, newFakeServer(t, &ga, nil))
+
+	dir := t.TempDir()
+	out := filepath.Join(dir, "mysql.json")
+
+	// first generation from an empty file crawls everything the fake serves
+	if err := generate(dir, "mysql", 4, os.Stderr); err != nil {
+		t.Fatal(err)
+	}
+	first, err := loadGenerated(out)
+	if err != nil || first == nil {
+		t.Fatalf("generated file missing: %v", err)
+	}
+	got := first.Version("8.0.46")
+	if got == nil || !got.PackagesFetched || len(got.Packages) == 0 {
+		t.Fatalf("8.0.46 packages not generated: %+v", got)
+	}
+	marker := got.Packages[0].MD5
+
+	// second generation with a new release on the GA page: only the new
+	// version is crawled, existing entries stay untouched
+	ga = strings.ReplaceAll(ga, "26.7.0", "26.7.1")
+	if err := generate(dir, "mysql", 4, os.Stderr); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := loadGenerated(out)
+	if second.Version("26.7.0") == nil || second.Version("26.7.1") == nil {
+		t.Errorf("incremental merge broken: %v %v", second.Version("26.7.0"), second.Version("26.7.1"))
+	}
+	if now := second.Version("8.0.46"); now.Packages[0].MD5 != marker {
+		t.Errorf("existing version was re-crawled/mutated")
+	}
 }

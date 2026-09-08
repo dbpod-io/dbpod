@@ -17,6 +17,7 @@ const FileName = "dbpod.yaml"
 //	engine: mysql
 //	version: "8.0.35"
 //	port: 3306
+//	bind: 127.0.0.1
 //	init-sql:
 //	  - ./scripts/schema.sql
 //	  - ./scripts/seed.sql
@@ -25,6 +26,7 @@ type Config struct {
 	Engine  string   `yaml:"engine"`         // e.g. mysql
 	Version string   `yaml:"version"`        // full version or series
 	Port    int      `yaml:"port"`           // server port
+	Bind    string   `yaml:"bind,omitempty"` // address the server binds (clients connect to it too; 0.0.0.0 exposes the LAN and clients fall back to 127.0.0.1)
 	InitSQL []string `yaml:"init-sql"`       // SQL files run on first initialization
 }
 
@@ -66,6 +68,9 @@ func Load(dir string) (*Config, error) {
 	}
 	if c.Port == 0 {
 		c.Port = 3306
+	}
+	if c.Bind == "" {
+		c.Bind = "127.0.0.1"
 	}
 	return &c, nil
 }

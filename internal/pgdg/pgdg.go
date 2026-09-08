@@ -1,4 +1,9 @@
-package postgres
+// Package pgdg reads the PostgreSQL upstream repositories: PGDG apt/yum
+// (version lists and linux server/client package resolution) and EDB
+// portable zips (win/macOS). It is shared by the runtime download
+// resolution and the metadata generator (cmd/pg-metadata-gen) — it
+// contains no generation logic itself.
+package pgdg
 
 import (
 	"bytes"
@@ -12,13 +17,8 @@ import (
 	"time"
 
 	"github.com/dbpod-io/dbpod/internal/dist"
-	"github.com/dbpod-io/dbpod/internal/metadata"
 	"github.com/ulikunitz/xz"
 )
-
-// pgdg.go: PGDG repository traversal — the authoritative version list and
-// the linux package pipeline (server/client/dependency .debs extracted into
-// a portable engine directory).
 
 const (
 	pgdgBase = "https://apt.postgresql.org/pub/repos/apt"
@@ -54,64 +54,72 @@ var aptBaselines = []aptBaseline{
 	{Codename: "noble", LibICU: "libicu74"},
 }
 
-// pgVersion strips the Debian revision from a package version:
+// YumBaselineDirs returns the EL baselines, lowest glibc first.
+func YumBaselineDirs() []string {
+	dirs := make([]string, 0, len(yumBaselines))
+	for _, b := range yumBaselines {
+		dirs = append(dirs, b.Dir)
+	}
+	return dirs
+}
+
+// AptCodenames returns the Debian/Ubuntu baselines.
+func AptCodenames() []string {
+	names := make([]string, 0, len(aptBaselines))
+	for _, b := range aptBaselines {
+		names = append(names, b.Codename)
+	}
+	return names
+}
+
+// PGVersion strips the Debian revision from a package version:
 // "17.11-1.pgdg12+2" → "17.11".
-func pgVersion(pkgVersion string) string {
+func PGVersion(pkgVersion string) string {
 	if i := strings.Index(pkgVersion, "-"); i > 0 {
 		return pkgVersion[:i]
 	}
 	return pkgVersion
 }
 
-func majorOf(version string) string {
+// MajorOf returns the major of a dotted version ("17.11" → "17").
+func MajorOf(version string) string {
 	if i := strings.Index(version, "."); i > 0 {
 		return version[:i]
 	}
 	return version
 }
 
-// resolvePGDG returns the linux DownloadPlan of a PG version, choosing the
+// Resolve returns the linux DownloadPlan of a PG version, choosing the
 // baseline with the lowest glibc that carries the version.
-func resolvePGDG(version string) (dist.DownloadPlan, error) {
-	major := majorOf(version)
+func Resolve(version string) (dist.DownloadPlan, error) {
+	major := MajorOf(version)
 
 	// yum baselines first (lowest glibc: el7 → el8 → el9)
 	for _, b := range yumBaselines {
-		debs, err := yumResolve(major, b.Dir)
-		if err != nil || len(debs) == 0 {
+		refs, err := YumResolve(major, b.Dir)
+		if err != nil || len(refs) == 0 {
 			continue
 		}
-		return archivePackage(version, b.Dir, debs, rpmExtractRules(major))
+		return archivePackage(version, refs, rpmExtractRules(major))
 	}
 
 	// apt baselines as fallback (bookworm → noble)
 	for _, b := range aptBaselines {
-		debs, err := aptResolve(major, b.Codename)
-		if err != nil || len(debs) == 0 {
+		refs, err := AptResolve(major, b.Codename)
+		if err != nil || len(refs) == 0 {
 			continue
 		}
-		return archivePackage(version, b.Codename, debs, debExtractRules(major))
+		return archivePackage(version, refs, debExtractRules(major))
 	}
 	return dist.DownloadPlan{}, fmt.Errorf("no PGDG baseline carries postgres %s", major)
 }
 
-// pickBaseline selects the lowest-glibc baseline carrying the PG major.
-func pickBaseline(version string) (*yumBaseline, error) {
-	major := majorOf(version)
-	for _, b := range yumBaselines {
-		if yumHasMajor(b.Dir, major) {
-			return &b, nil
-		}
-	}
-	return nil, fmt.Errorf("no PGDG yum baseline carries postgres %s", major)
-}
-
 // archivePackage assembles the linux DownloadPlan for a set of archive
-// downloads (.deb or .rpm); debs[0] is the main archive, the rest ride
+// downloads (.deb or .rpm); refs[0] is the main archive, the rest ride
 // along as dependencies.
-func archivePackage(version, baseline string, debs []archiveRef, rules [][2]string) (dist.DownloadPlan, error) {
+func archivePackage(version string, refs []Ref, rules [][2]string) (dist.DownloadPlan, error) {
 	plan := dist.DownloadPlan{Version: version}
-	for i, d := range debs {
+	for i, d := range refs {
 		f := dist.DownloadFile{
 			URL:  d.URL,
 			Kind: "deb",
@@ -148,14 +156,14 @@ func rpmExtractRules(major string) [][2]string {
 
 // --- apt (Packages.gz) ------------------------------------------------------
 
-// debRef is one .deb resolved from a Packages index.
-type archiveRef struct {
+// Ref is one .deb/.rpm resolved from a repository index.
+type Ref struct {
 	URL string
 }
 
-// aptResolve resolves the server+client .deb URLs of a PG major in the
+// AptResolve resolves the server+client .deb URLs of a PG major in the
 // given codename baseline.
-func aptResolve(major, codename string) ([]archiveRef, error) {
+func AptResolve(major, codename string) ([]Ref, error) {
 	data, err := fetchAndDecompress(fmt.Sprintf("%s/dists/%s-pgdg/main/binary-amd64/Packages.gz", pgdgBase, codename))
 	if err != nil {
 		return nil, err
@@ -163,7 +171,7 @@ func aptResolve(major, codename string) ([]archiveRef, error) {
 	server := fmt.Sprintf("postgresql-%s", major)
 	client := fmt.Sprintf("postgresql-client-%s", major)
 	want := map[string]bool{server: true, client: true}
-	found := map[string]archiveRef{}
+	found := map[string]Ref{}
 
 	for _, block := range strings.Split(string(data), "\n\n") {
 		name, file := "", ""
@@ -181,10 +189,10 @@ func aptResolve(major, codename string) ([]archiveRef, error) {
 			continue
 		}
 		if found[name].URL == "" {
-			found[name] = archiveRef{URL: pgdgBase + "/" + file}
+			found[name] = Ref{URL: pgdgBase + "/" + file}
 		}
 	}
-	var out []archiveRef
+	var out []Ref
 	for _, n := range []string{server, client} {
 		ref, ok := found[n]
 		if !ok {
@@ -195,9 +203,9 @@ func aptResolve(major, codename string) ([]archiveRef, error) {
 	return out, nil
 }
 
-// aptSeriesVersions lists the PG versions (major.minor) of a PG major in a
+// AptSeriesVersions lists the PG versions (major.minor) of a PG major in a
 // codename baseline, newest first.
-func aptSeriesVersions(codename string) ([]string, error) {
+func AptSeriesVersions(codename string) ([]string, error) {
 	data, err := fetchAndDecompress(fmt.Sprintf("%s/dists/%s-pgdg/main/binary-amd64/Packages.gz", pgdgBase, codename))
 	if err != nil {
 		return nil, err
@@ -220,7 +228,7 @@ func aptSeriesVersions(codename string) ([]string, error) {
 		if !isServerPkgName(name) || ver == "" {
 			continue
 		}
-		v := pgVersion(ver)
+		v := PGVersion(ver)
 		if !seen[v] {
 			seen[v] = true
 			out = append(out, v)
@@ -257,13 +265,9 @@ type rpmPkg struct {
 	Location string `xml:"location"`
 }
 
-type primaryIndex struct {
-	Packages []rpmPkg `xml:"package"`
-}
-
-// yumResolve resolves the server+client rpm URLs of a PG major in an EL
+// YumResolve resolves the server+client rpm URLs of a PG major in an EL
 // baseline (e.g. "el7").
-func yumResolve(major, baseline string) ([]archiveRef, error) {
+func YumResolve(major, baseline string) ([]Ref, error) {
 	server := fmt.Sprintf("postgresql-%s", major)
 	client := fmt.Sprintf("postgresql-client-%s", major)
 
@@ -278,7 +282,7 @@ func yumResolve(major, baseline string) ([]archiveRef, error) {
 			found[p.Name] = p
 		}
 	}
-	var out []archiveRef
+	var out []Ref
 	for _, n := range []string{server, client} {
 		p, ok := found[n]
 		if !ok {
@@ -289,14 +293,14 @@ func yumResolve(major, baseline string) ([]archiveRef, error) {
 			loc = yumBase + "/" + strings.TrimPrefix(loc, "../")
 			loc = strings.Replace(loc, "/redhat/../", "/", 1)
 		}
-		out = append(out, archiveRef{URL: loc})
+		out = append(out, Ref{URL: loc})
 	}
 	return out, nil
 }
 
-// yumSeriesVersions lists the PG versions (major.minor) of a PG major in an
+// YumSeriesVersions lists the PG versions (major.minor) of a PG major in an
 // EL baseline, newest first.
-func yumSeriesVersions(baseline, major string) ([]string, error) {
+func YumSeriesVersions(baseline, major string) ([]string, error) {
 	rpms, err := yumPrimaryPackages(baseline, major)
 	if err != nil {
 		return nil, err
@@ -307,7 +311,7 @@ func yumSeriesVersions(baseline, major string) ([]string, error) {
 		if p.Name != fmt.Sprintf("postgresql-%s", major) {
 			continue
 		}
-		v := pgVersion(p.Version)
+		v := PGVersion(p.Version)
 		if !seen[v] {
 			seen[v] = true
 			out = append(out, v)
@@ -317,8 +321,8 @@ func yumSeriesVersions(baseline, major string) ([]string, error) {
 	return out, nil
 }
 
-// yumHasMajor reports whether the baseline carries the PG major.
-func yumHasMajor(baseline, major string) bool {
+// YumHasMajor reports whether the baseline carries the PG major.
+func YumHasMajor(baseline, major string) bool {
 	paths := []string{
 		fmt.Sprintf("%s/%s/redhat/%s/repodata/repomd.xml", yumBase, major, baseline),
 		fmt.Sprintf("%s/common/redhat/%s/repodata/repomd.xml", yumBase, baseline),
@@ -405,7 +409,7 @@ func yumRepoPaths(baseline, major string) []string {
 // --- shared fetch/decompress helpers ----------------------------------------
 
 // fetchAndDecompress GETs a URL and transparently decompresses gzip (and
-// xz/zstd when compiled in), returning plain text/bytes.
+// xz when compiled in), returning plain text/bytes.
 func fetchAndDecompress(url string) ([]byte, error) {
 	resp, err := httpClient.Get(url)
 	if err != nil {
@@ -437,51 +441,53 @@ func fetchAndDecompress(url string) ([]byte, error) {
 	return data, nil
 }
 
-// traversePGDG builds the version index from the PGDG repositories: apt
-// Packages indexes for the apt baselines + yum primary indexes for the yum
-// baselines. Versions absent from PGDG are not supported; per-platform
-// packages (win/mac EDB) resolve on demand.
-func traversePGDG() (*metadata.Index, error) {
-	ix := &metadata.Index{
-		Engine:   "postgres",
-		Versions: map[string]*metadata.VersionInfo{},
-	}
-	seen := map[string]bool{}
+// --- EDB (win/macOS portable zips) -------------------------------------------
 
-	add := func(v string) {
-		if v == "" || seen[v] {
-			return
-		}
-		seen[v] = true
-		ix.Versions[v] = &metadata.VersionInfo{
-			Version:         v,
-			Series:          majorOf(v),
-			PackagesFetched: true,
-		}
+// EDBPlatformKeys are the non-linux platforms EDB ships portable zips for.
+func EDBPlatformKeys() [][2]string {
+	return [][2]string{
+		{"darwin", "arm64"},
+		{"darwin", "amd64"},
+		{"windows", "amd64"},
 	}
+}
 
-	for _, b := range yumBaselines {
-		for maj := 9; maj <= 18; maj++ {
-			versions, err := yumSeriesVersions(b.Dir, fmt.Sprint(maj))
-			if err != nil {
-				continue // baseline/major absent: skip
-			}
-			for _, v := range versions {
-				add(v)
-			}
-		}
+// edbOSName maps GOOS to the EDB download naming.
+func edbOSName(goos string) string {
+	if goos == "darwin" {
+		return "osx"
 	}
-	for _, b := range aptBaselines {
-		versions, err := aptSeriesVersions(b.Codename)
-		if err != nil {
-			continue
-		}
-		for _, v := range versions {
-			add(v)
-		}
+	return goos
+}
+
+// edbArchName maps GOARCH to the EDB download naming.
+func edbArchName(goarch string) string {
+	if goarch == "amd64" {
+		return "x64"
 	}
-	if len(ix.Versions) == 0 {
-		return nil, fmt.Errorf("no postgres versions discovered in PGDG repositories")
+	return goarch
+}
+
+// ProbeEDB checks whether the EDB portable zip of a PG version exists for
+// the platform (HEAD probe of the constructed URL). Returns the URL and
+// whether it exists.
+func ProbeEDB(version, goos, goarch string) (string, bool) {
+	var url string
+	if goos == "darwin" {
+		url = fmt.Sprintf("https://get.enterprisedb.com/postgresql/postgresql-%s-1-osx-binaries.zip", version)
+	} else {
+		url = fmt.Sprintf("https://get.enterprisedb.com/postgresql/postgresql-%s-1-%s-%s-binaries.zip",
+			version, edbOSName(goos), edbArchName(goarch))
 	}
-	return ix, nil
+	req, err := http.NewRequest(http.MethodHead, url, nil)
+	if err != nil {
+		return url, false
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return url, false
+	}
+	resp.Body.Close()
+	return url, resp.StatusCode == 200
 }

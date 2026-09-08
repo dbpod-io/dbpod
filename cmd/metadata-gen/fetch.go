@@ -1,8 +1,9 @@
-package metadata
+package main
 
 import (
 	"fmt"
 	"io"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 	"net/http"
 	"time"
 )
@@ -21,11 +22,6 @@ const (
 	osIDLinux   = "2"
 	osIDWindows = "3"
 )
-
-// CDNURL builds the absolute official download URL for a package file.
-func CDNURL(series, filename string) string {
-	return OfficialDownloadsBase + "/MySQL-" + series + "/" + filename
-}
 
 // RelURL builds the relative download URL of a package file, as stored in
 // the generated metadata. It resolves against the parent directory of the
@@ -75,7 +71,7 @@ func get(url string, opt FetchOption) (string, error) {
 }
 
 // FetchGAIndexVersions lists the latest version series from the GA page.
-func FetchGAIndexVersions(opt FetchOption) ([]VersionInfo, error) {
+func FetchGAIndexVersions(opt FetchOption) ([]metadata.VersionInfo, error) {
 	html, err := get(gaIndexURL, opt)
 	if err != nil {
 		return nil, err
@@ -102,8 +98,8 @@ func FetchArchiveVersions(opt FetchOption) ([]string, error) {
 
 // FetchGAPackages lists packages of the latest patch release of a series
 // (e.g. "8.0") by querying the GA page for each relevant OS.
-func FetchGAPackages(series string, opt FetchOption) ([]Package, error) {
-	var all []Package
+func FetchGAPackages(series string, opt FetchOption) ([]metadata.Package, error) {
+	var all []metadata.Package
 	for _, osID := range []string{osIDMacOS, osIDLinux, osIDWindows} {
 		url := fmt.Sprintf("%s?version=%s&os=%s", gaIndexURL, series, osID)
 		html, err := get(url, opt)
@@ -119,8 +115,8 @@ func FetchGAPackages(series string, opt FetchOption) ([]Package, error) {
 // (e.g. "9.7.1") from the archive page. The os parameter selects which
 // platform section is rendered server-side, so all relevant OS ids are
 // queried and merged.
-func FetchArchivePackages(version string, opt FetchOption) ([]Package, error) {
-	var all []Package
+func FetchArchivePackages(version string, opt FetchOption) ([]metadata.Package, error) {
+	var all []metadata.Package
 	for _, osID := range []string{osIDMacOS, osIDLinux, osIDWindows} {
 		url := fmt.Sprintf("%s?tpl=version&os=%s&version=%s&osva=", archiveBaseURL, osID, version)
 		html, err := get(url, opt)

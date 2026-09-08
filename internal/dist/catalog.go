@@ -56,15 +56,17 @@ type Provider interface {
 }
 
 // DownloadPlan is everything needed to fetch an engine distribution.
+// Its JSON shape is the helper contract for resolve-download (see
+// internal/contract).
 type DownloadPlan struct {
-	Version string
-	Main    DownloadFile
-	Deps    []DownloadFile
+	Version string        `json:"version"`
+	Main    DownloadFile  `json:"main"`
+	Deps    []DownloadFile `json:"deps,omitempty"`
 }
 
 // DownloadFile is one archive to download (with checksum when published).
 type DownloadFile struct {
-	URL          string
+	URL          string      `json:"url"`
 	FallbackURL  string      `json:"fallback_url,omitempty"`
 	SHA256       string      `json:"sha256,omitempty"`
 	MD5          string      `json:"md5,omitempty"`

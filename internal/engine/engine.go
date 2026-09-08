@@ -11,11 +11,24 @@ import (
 
 // Options carries everything an engine needs to run one server instance.
 type Options struct {
-	BinDir  string // directory containing the engine binaries (dist root + /bin)
-	DataDir string // datadir for this instance
-	Port    int
-	Socket  string // optional unix socket path ("" = TCP only)
-	Name    string // server name, used for pid/log file naming
+	BinDir      string // directory containing the engine binaries (dist root + /bin)
+	DataDir     string // datadir for this instance
+	Port        int
+	BindAddress string // address the server binds and clients connect to ("" = 127.0.0.1)
+	Socket      string // optional unix socket path ("" = TCP only)
+	Name        string // server name, used for pid/log file naming
+}
+
+// ConnectHost derives the host clients should connect to from the server
+// bind address: wildcard binds listen on every interface, but 0.0.0.0 is
+// not reliably connectable, so clients fall back to the loopback.
+func ConnectHost(bind string) string {
+	switch bind {
+	case "", "0.0.0.0", "*":
+		return "127.0.0.1"
+	default:
+		return bind
+	}
 }
 
 // Engine is implemented per database engine.

@@ -1,0 +1,10 @@
+{
+  "contract_version": 1,
+  "engine": "mariadb",
+  "init": "mariadb-install-db --defaults-file={{ config_path }} --auth-root-authentication-method=normal",
+  "start": "mariadbd --defaults-file={{ config_path }}",
+  "client": "mariadb -u root -h {{ host }} -P {{ port }}",
+  "exec": "mariadb -u root -h {{ host }} -P {{ port }} -e {{ sql }}",
+  "shutdown": "mariadb-admin -u root -h {{ host }} -P {{ port }} shutdown",
+  "config": "[mysqld]\ndatadir={{ datadir }}\nport={{ port }}\n"
+}

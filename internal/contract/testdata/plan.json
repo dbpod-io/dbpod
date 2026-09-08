@@ -1,0 +1,11 @@
+{
+  "version": "11.4.5",
+  "main": {
+    "url": "mariadb-11.4.5/bintar-linux-systemd-x86_64/mariadb-11.4.5-linux-systemd-x86_64.tar.gz",
+    "fallback_url": "https://archive.mariadb.org/mariadb-11.4.5/bintar-linux-systemd-x86_64/mariadb-11.4.5-linux-systemd-x86_64.tar.gz",
+    "sha256": "abc0000000000000000000000000000000000000000000000000000000000000",
+    "size": 326718696,
+    "kind": "tar.gz",
+    "root_dir": ""
+  }
+}

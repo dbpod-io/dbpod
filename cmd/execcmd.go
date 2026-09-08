@@ -42,19 +42,19 @@ engine's default client:
 The process exit code is propagated.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		engName, version, port, dataDir, err := resolveExecTarget(args[0])
+		engName, version, port, bind, dataDir, err := resolveExecTarget(args[0])
 		if err != nil {
 			return err
 		}
-		return runInstanceExec(engName, version, port, dataDir, args[1:])
+		return runInstanceExec(engName, version, port, bind, dataDir, args[1:])
 	},
 }
 
 // runInstanceExec executes a binary of the given engine distribution
 // (shared by `dbpod exec` and `dbpod project exec`). When dataDir is set
-// (an instance target) the default client is pre-wired with root@socket
+// (an instance target) the default client is pre-wired with root
 // connection parameters.
-func runInstanceExec(engName, version string, port int, dataDir string, rest []string) error {
+func runInstanceExec(engName, version string, port int, bind, dataDir string, rest []string) error {
 	if !dist.Installed(engName, version) {
 		return fmt.Errorf("engine %s@%s is not installed; run: dbpod engine install %s@%s", engName, version, engName, version)
 	}
@@ -80,8 +80,8 @@ func runInstanceExec(engName, version string, port int, dataDir string, rest []s
 	}
 	if binary == "" {
 		_, binary, _ = eng.BinaryNames()
-		if dataDir != "" { // instance target: pre-wire root@socket connection
-			rest = append(eng.ClientArgs(engine.Options{DataDir: dataDir, Port: port}), rest...)
+		if dataDir != "" { // instance target: pre-wire root connection
+			rest = append(eng.ClientArgs(engine.Options{DataDir: dataDir, Port: port, BindAddress: bind}), rest...)
 		}
 	}
 
@@ -112,21 +112,21 @@ func runInstanceExec(engName, version string, port int, dataDir string, rest []s
 // resolveExecTarget maps the first exec argument to engine@version plus the
 // instance datadir ("" for a bare engine target): engine ids are tried
 // first, then instance ids; anything else errors with a hint for both forms.
-func resolveExecTarget(id string) (engName, version string, port int, dataDir string, err error) {
+func resolveExecTarget(id string) (engName, version string, port int, bind, dataDir string, err error) {
 	if ref, perr := dist.ParseRef(id); perr == nil {
 		if v, rerr := resolveVersion(ref); rerr == nil && dist.Installed(ref.Engine, v) {
-			return ref.Engine, v, 0, "", nil
+			return ref.Engine, v, 0, "", "", nil
 		}
 		if r, serr := instanceGet(id); serr == nil {
-			return r.Engine, r.Version, r.Port, r.DataDir, nil
+			return r.Engine, r.Version, r.Port, r.BindAddress, r.DataDir, nil
 		}
-		return "", "", 0, "", fmt.Errorf("engine %q is not installed; run: dbpod engine install %s", id, id)
+		return "", "", 0, "", "", fmt.Errorf("engine %q is not installed; run: dbpod engine install %s", id, id)
 	}
 	r, serr := instanceGet(id)
 	if serr == nil {
-		return r.Engine, r.Version, r.Port, r.DataDir, nil
+		return r.Engine, r.Version, r.Port, r.BindAddress, r.DataDir, nil
 	}
-	return "", "", 0, "", fmt.Errorf("%q is neither an installed engine (e.g. mysql@8.0.46) nor a known instance (see `dbpod ps`)", id)
+	return "", "", 0, "", "", fmt.Errorf("%q is neither an installed engine (e.g. mysql@8.0.46) nor a known instance (see `dbpod ps`)", id)
 }
 
 // hasExecutable reports whether arg names an executable shipped with the

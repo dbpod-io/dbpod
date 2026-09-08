@@ -16,6 +16,7 @@ import (
 var (
 	initEngine string
 	initPort   int
+	initBind   string
 	forceFlag  bool
 )
 
@@ -45,6 +46,7 @@ var projectCmds = []*cobra.Command{
 				Engine:  ref.Engine,
 				Version: version,
 				Port:    initPort,
+				Bind:    initBind,
 			}
 			if err := config.Save(cwd, c); err != nil {
 				return err
@@ -98,12 +100,13 @@ var projectCmds = []*cobra.Command{
 			}
 
 			spec := instance.Spec{
-				Name:    name,
-				Engine:  c.Engine,
-				Version: version,
-				DataDir: dataDir,
-				DataEnv: name,
-				Port:    c.Port,
+				Name:        name,
+				Engine:      c.Engine,
+				Version:     version,
+				DataDir:     dataDir,
+				DataEnv:     name,
+				Port:        c.Port,
+				BindAddress: c.Bind,
 			}
 			record, err := instance.Start(spec, os.Stdout)
 			if err != nil {
@@ -116,7 +119,7 @@ var projectCmds = []*cobra.Command{
 				if files, err := c.ResolveInitSQL(dir); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 				} else if len(files) > 0 {
-					if err := importSQL(c.Engine, version, files, c.Port); err != nil {
+					if err := importSQL(c.Engine, version, files, c.Port, c.Bind); err != nil {
 						return err
 					}
 					fmt.Fprintf(os.Stdout, "imported %d init-sql file(s)\n", len(files))
@@ -228,7 +231,7 @@ var projectCmds = []*cobra.Command{
 			if len(rest) > 0 && rest[0] == r.Name {
 				rest = rest[1:] // explicit instance selector consumed
 			}
-			return runInstanceExec(r.Engine, r.Version, r.Port, r.DataDir, rest)
+			return runInstanceExec(r.Engine, r.Version, r.Port, r.BindAddress, r.DataDir, rest)
 		},
 	},
 }
@@ -257,6 +260,7 @@ func init() {
 		if c.Name() == "init" {
 			c.Flags().StringVar(&initEngine, "engine", "mysql@8.0", "engine spec <engine>@<version|series>")
 			c.Flags().IntVar(&initPort, "port", 3306, "instance port")
+			c.Flags().StringVar(&initBind, "bind", "", "address the server binds (default: 127.0.0.1)")
 			c.Flags().BoolVarP(&forceFlag, "force", "f", false, "overwrite existing dbpod.yaml")
 		}
 		if c.Name() == "clean" {

@@ -1,0 +1,19 @@
+{
+  "engine": "mariadb",
+  "fetched_at": "2026-09-05T12:00:00Z",
+  "base_url": "https://archive.mariadb.org/",
+  "versions": {
+    "11.4.5": {
+      "version": "11.4.5",
+      "series": "11.4",
+      "lts": true,
+      "latest": false
+    },
+    "11.8.2": {
+      "version": "11.8.2",
+      "series": "11.8",
+      "lts": true,
+      "latest": true
+    }
+  }
+}

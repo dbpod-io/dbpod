@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
+	"github.com/dbpod-io/dbpod/internal/external"
 	"github.com/dbpod-io/dbpod/internal/globalconfig"
 	"github.com/dbpod-io/dbpod/internal/instance"
 	"github.com/spf13/cobra"
@@ -34,9 +36,17 @@ func Execute() {
 	if len(os.Args) < 2 || os.Args[1] != "monitor" {
 		instance.Reap(os.Stderr)
 	}
-	// apply global config (network proxy) before any command runs
+	// apply global config (network proxy) and mount config-declared
+	// engines (engines.d manifests) before any command runs
 	if cfg, err := globalconfig.Load(); err == nil {
 		cfg.Apply()
+		manifests, merrs := globalconfig.LoadEngines()
+		for _, me := range merrs {
+			fmt.Fprintf(os.Stderr, "note: engine manifest: %v\n", me)
+		}
+		external.Mount(manifests, &globalconfig.Config{}, os.Stderr)
+	} else {
+		fmt.Fprintf(os.Stderr, "note: global config: %v\n", err)
 	}
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
