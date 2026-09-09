@@ -59,8 +59,8 @@ type Provider interface {
 // Its JSON shape is the helper contract for resolve-download (see
 // internal/contract).
 type DownloadPlan struct {
-	Version string        `json:"version"`
-	Main    DownloadFile  `json:"main"`
+	Version string         `json:"version"`
+	Main    DownloadFile   `json:"main"`
 	Deps    []DownloadFile `json:"deps,omitempty"`
 }
 

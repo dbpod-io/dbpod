@@ -16,8 +16,8 @@ var embeddedMySQLGZ []byte
 // by the owning engine packages at init time (mysql registers its gz copy
 // here; postgres registers versions.json in providers/postgres).
 var (
-	embeddedMu   sync.RWMutex
-	embeddedRaw  = map[string][]byte{}
+	embeddedMu     sync.RWMutex
+	embeddedRaw    = map[string][]byte{}
 	embeddedGunzip = map[string]bool{} // whether the bytes are gzip-compressed
 )
 

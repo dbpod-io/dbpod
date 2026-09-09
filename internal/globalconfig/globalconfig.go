@@ -62,7 +62,7 @@ type EngineManifest struct {
 	// Version is the manifest revision, bumped by the engine project when
 	// the manifest content changes. `registry update` compares the local
 	// version against the source's and refreshes when the source is newer.
-	Version int `yaml:"version,omitempty"`
+	Version string `yaml:"version,omitempty"` // content version, major.minor ("0.1" initial); bumped by the engine project
 
 	// Source records where the manifest was registered from (filled by
 	// `registry add` for remote sources); `registry update` re-fetches it

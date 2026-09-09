@@ -21,6 +21,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/dbpod-io/dbpod/internal/metadata"
@@ -55,7 +57,7 @@ func generate(dir string, concurrency int, out io.Writer) error {
 	if err := probeEDBEntries(ix, concurrency, out); err != nil {
 		return err
 	}
-	ix.Revision = currentRevision(dir) + 1
+	ix.Revision = bumpVersion(currentRevision(dir))
 	data, err := json.MarshalIndent(ix, "", "  ")
 	if err != nil {
 		return err
@@ -63,17 +65,28 @@ func generate(dir string, concurrency int, out io.Writer) error {
 	return os.WriteFile(filepath.Join(dir, "versions.json"), data, 0o644)
 }
 
-// currentRevision reads the revision of the committed index (0 when absent).
-func currentRevision(dir string) int {
+// currentRevision reads the content version of the committed index (""
+// when absent).
+func currentRevision(dir string) string {
 	data, err := os.ReadFile(filepath.Join(dir, "versions.json"))
 	if err != nil {
-		return 0
+		return ""
 	}
 	var ix metadata.Index
 	if err := json.Unmarshal(data, &ix); err != nil {
-		return 0
+		return ""
 	}
 	return ix.Revision
+}
+
+// bumpVersion returns the next major.minor content version ("0.1" first).
+func bumpVersion(v string) string {
+	major, minor := 0, 0
+	if p := strings.SplitN(v, ".", 2); len(p) == 2 {
+		major, _ = strconv.Atoi(p[0])
+		minor, _ = strconv.Atoi(p[1])
+	}
+	return fmt.Sprintf("%d.%d", major, minor+1)
 }
 
 // traverse collects every PG version from the PGDG repositories.

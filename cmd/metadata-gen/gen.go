@@ -10,6 +10,8 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,9 +33,6 @@ func generate(dataDir, engine string, concurrency int, stdout io.Writer) error {
 	if ix == nil {
 		ix = &metadata.Index{Engine: engine, Versions: map[string]*metadata.VersionInfo{}}
 	}
-	// every regeneration bumps the content revision: `registry update`
-	// compares revisions to decide whether an update is needed
-	ix.Revision++
 
 	// discover versions (2 requests)
 	opt := FetchOption{}
@@ -71,6 +70,13 @@ func generate(dataDir, engine string, concurrency int, stdout io.Writer) error {
 	}
 	ix.FetchedAt = time.Now()
 	ix.Engine = engine
+	// content version (major.minor): every regeneration bumps the minor
+	major, minor := 0, 0
+	if p := strings.SplitN(ix.Revision, ".", 2); len(p) == 2 {
+		major, _ = strconv.Atoi(p[0])
+		minor, _ = strconv.Atoi(p[1])
+	}
+	ix.Revision = fmt.Sprintf("%d.%d", major, minor+1)
 	return saveGenerated(outPath, ix)
 }
 

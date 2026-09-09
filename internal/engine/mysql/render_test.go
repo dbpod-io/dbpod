@@ -48,10 +48,10 @@ func TestHostVariableFollowsBind(t *testing.T) {
 	dir := t.TempDir()
 	e := New(DefaultProfile())
 	cases := map[string]string{
-		"":         "127.0.0.1",
-		"127.0.0.1": "127.0.0.1",
-		"0.0.0.0":  "127.0.0.1",
-		"*":        "127.0.0.1",
+		"":            "127.0.0.1",
+		"127.0.0.1":   "127.0.0.1",
+		"0.0.0.0":     "127.0.0.1",
+		"*":           "127.0.0.1",
 		"192.168.1.5": "192.168.1.5",
 	}
 	for bind, want := range cases {

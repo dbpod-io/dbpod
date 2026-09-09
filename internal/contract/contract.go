@@ -73,7 +73,8 @@ type EngineProfile struct {
 
 // Validate checks the data-level invariants of a profile. Security
 // checks (binary resolution inside the versions dir) happen at
-// execution time.
+// execution time. Init may be empty: families whose servers
+// self-initialize (mongodb) declare it optional.
 func (p *EngineProfile) Validate() error {
 	if p.ContractVersion != Version {
 		return fmt.Errorf("contract version %d, want %d", p.ContractVersion, Version)
@@ -84,7 +85,14 @@ func (p *EngineProfile) Validate() error {
 	for _, c := range []struct {
 		action, command string
 	}{{"init", p.Init}, {"start", p.Start}, {"client", p.Client}, {"exec", p.Exec}, {"shutdown", p.Shutdown}} {
-		if err := validateCommand(c.action, c.command); err != nil {
+		if c.action != "init" {
+			if err := validateCommand(c.action, c.command); err != nil {
+				return err
+			}
+		}
+	}
+	if p.Init != "" {
+		if err := validateCommand("init", p.Init); err != nil {
 			return err
 		}
 	}

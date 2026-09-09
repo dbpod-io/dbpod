@@ -56,7 +56,7 @@ type VersionInfo struct {
 // Index is the persisted metadata cache for one engine.
 type Index struct {
 	Engine    string                  `json:"engine"`
-	Revision  int                     `json:"revision,omitempty"` // content revision, bumped by the generator on regeneration
+	Revision  string                  `json:"version,omitempty"` // content version (major.minor), bumped by the generator on regeneration
 	FetchedAt time.Time               `json:"fetched_at"`
 	BaseURL   string                  `json:"base_url,omitempty"` // parent directory of the metadata file; relative package URLs resolve against it
 	Versions  map[string]*VersionInfo `json:"versions"`           // key: full version

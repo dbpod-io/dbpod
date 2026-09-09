@@ -218,7 +218,7 @@ func TestRegistryAddIndexURLForms(t *testing.T) {
 func TestRegistryUpdate(t *testing.T) {
 	t.Setenv("DBPOD_HOME", t.TempDir())
 	var hits int64
-	index := `{"engine":"mariadb","versions":{"1.0.0":{"version":"1.0.0","series":"1.0"}}}`
+	index := `{"engine":"mariadb","version":"0.1","versions":{"1.0.0":{"version":"1.0.0","series":"1.0"}}}`
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mariadb.json", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&hits, 1)
@@ -255,7 +255,7 @@ func TestRegistryUpdate(t *testing.T) {
 	if n := atomic.LoadInt64(&hits); n != 2 {
 		t.Errorf("update fetched index %d times total, want 2", n)
 	}
-	if !strings.Contains(out.String(), "index up to date (revision 0,") {
+	if !strings.Contains(out.String(), "index up to date (v0.1, 1 versions)") {
 		t.Errorf("update output = %q", out.String())
 	}
 
@@ -315,7 +315,7 @@ func TestRegistryBuiltinSemantics(t *testing.T) {
 
 	// serve the canonical update URL locally (revision 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"engine":"mysql","revision":%d,"versions":{"9.9.9":{"version":"9.9.9","series":"9.9"}}}`, atomic.LoadInt32(&remoteRevision))
+		fmt.Fprintf(w, `{"engine":"mysql","version":"%d.0","versions":{"9.9.9":{"version":"9.9.9","series":"9.9"}}}`, atomic.LoadInt32(&remoteRevision))
 	}))
 	defer srv.Close()
 	oldURL := builtinEngines["mysql"]
@@ -356,7 +356,7 @@ func TestRegistryBuiltinSemantics(t *testing.T) {
 	if err := runRegistryUpdate([]string{"mysql"}, "", &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "index up to date (revision 2,") {
+	if !strings.Contains(out.String(), "index up to date (v2.0,") {
 		t.Errorf("update output = %q", out.String())
 	}
 
@@ -366,7 +366,7 @@ func TestRegistryBuiltinSemantics(t *testing.T) {
 	if err := runRegistryUpdate([]string{"mysql"}, "", &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "index updated (revision 2 → 3") {
+	if !strings.Contains(out.String(), "index updated (v2.0 → v3.0") {
 		t.Errorf("update output = %q", out.String())
 	}
 }
@@ -383,7 +383,7 @@ func TestRegistryUpdateManifestFromSource(t *testing.T) {
 	manifestBody := func() string {
 		return strings.Replace(strings.Replace(testManifestYAML,
 			`index_url: "https://example.invalid/mariadb.json"`, `index_url: mariadb.json`, 1),
-			`name: mariadb`, fmt.Sprintf("name: mariadb\nversion: %d", atomic.LoadInt32(&upstreamVersion)), 1)
+			`name: mariadb`, fmt.Sprintf("name: mariadb\nversion: \"%d.0\"", atomic.LoadInt32(&upstreamVersion)), 1)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/pkg/mariadb.yaml", func(w http.ResponseWriter, r *http.Request) {
@@ -404,7 +404,7 @@ func TestRegistryUpdateManifestFromSource(t *testing.T) {
 	if err := runRegistryUpdate([]string{"mariadb"}, "", &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "up to date (v1)") {
+	if !strings.Contains(out.String(), "up to date (v1.0)") {
 		t.Errorf("update output = %q", out.String())
 	}
 
@@ -414,7 +414,7 @@ func TestRegistryUpdateManifestFromSource(t *testing.T) {
 	if err := runRegistryUpdate([]string{"mariadb"}, "", &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "updated mariadb (v1 → v2") {
+	if !strings.Contains(out.String(), "updated mariadb (v1.0 → v2.0") {
 		t.Errorf("update output = %q", out.String())
 	}
 
@@ -427,7 +427,7 @@ func TestRegistryUpdateManifestFromSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "version: 2") || !strings.Contains(string(data), srv.URL+"/pkg/mariadb.json") {
+	if !strings.Contains(string(data), `version: "2.0"`) || !strings.Contains(string(data), srv.URL+"/pkg/mariadb.json") {
 		t.Errorf("stored manifest = %s", data)
 	}
 }

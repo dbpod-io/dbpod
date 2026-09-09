@@ -234,14 +234,17 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 
 	// PGDG-style packages: companion dependency archives (shared libs) are
 	// downloaded and extracted alongside the main archive
-	var depArchives []string
+	type depArchive struct {
+		path, kind string
+	}
+	var depArchives []depArchive
 	for i, dep := range plan.Deps {
 		fmt.Fprintf(stdout, "downloading dependency %d/%d: %s\n", i+1, len(plan.Deps), dep.URL)
 		depPath, derr := fetchDownload(dep.URL, "", 0, io.Discard)
 		if derr != nil {
 			return derr
 		}
-		depArchives = append(depArchives, depPath)
+		depArchives = append(depArchives, depArchive{path: depPath, kind: dep.Kind})
 		defer os.Remove(depPath)
 		_ = dep.SHA256 // checksums for dependency archives: verify when published
 	}
@@ -251,7 +254,11 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 	// deb/rpm pipelines extract with prefix-mapping rules (bin/lib/share/
 	// shared_libs); regular archives use the generic extractor
 	if main.Kind == "deb" || main.Kind == "rpm" {
-		if err := extractEnginePackage(main.Kind, archive, depArchives, base, main.ExtractRules); err != nil {
+		depPaths := make([]string, 0, len(depArchives))
+		for _, d := range depArchives {
+			depPaths = append(depPaths, d.path)
+		}
+		if err := extractEnginePackage(main.Kind, archive, depPaths, base, main.ExtractRules); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "installed %s\n", ref)
@@ -268,8 +275,67 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 	if err := os.WriteFile(filepath.Join(base, ".dbpod-root"), []byte(rel+"\n"), 0o644); err != nil {
 		return err
 	}
+
+	// dependency archives (e.g. mongosh riding along with mongod) extract
+	// into the platform dir; their own top-level directories are merged
+	// into the main root so their binaries join the engine's bin/
+	for _, dep := range depArchives {
+		if err := mergeArchiveIntoRoot(dep.kind, dep.path, base, rel); err != nil {
+			fmt.Fprintf(stdout, "warning: dependency merge: %v\n", err)
+		}
+	}
+
 	postInstall(base, stdout)
 	fmt.Fprintf(stdout, "installed %s\n", ref)
+	return nil
+}
+
+// mergeArchiveIntoRoot extracts a dependency archive into a temp dir and
+// moves its single top-level directory's contents into the engine root,
+// so dependency binaries land in the same bin/ as the engine's own.
+func mergeArchiveIntoRoot(kind, depPath, base, root string) error {
+	tmp, err := os.MkdirTemp(base, ".dep-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	if _, err := extract(kind, depPath, tmp); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		return err
+	}
+	rootDir := filepath.Join(base, root)
+	for _, e := range entries {
+		if err := mergeDir(filepath.Join(tmp, e.Name()), rootDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mergeDir moves every entry of src into dst, recursing when both sides
+// hold a directory of the same name.
+func mergeDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		s, d := filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			if fi, statErr := os.Stat(d); statErr == nil && fi.IsDir() {
+				if err := mergeDir(s, d); err != nil {
+					return err
+				}
+				continue
+			}
+		}
+		if err := os.Rename(s, d); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

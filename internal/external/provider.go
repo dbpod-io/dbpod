@@ -16,6 +16,7 @@ import (
 	"github.com/dbpod-io/dbpod/internal/dist"
 	"github.com/dbpod-io/dbpod/internal/fetch"
 	"github.com/dbpod-io/dbpod/internal/globalconfig"
+	"github.com/dbpod-io/dbpod/internal/hostfacts"
 	"github.com/dbpod-io/dbpod/internal/metadata"
 )
 
@@ -120,9 +121,54 @@ func (p *Provider) ResolveVersion(version, mirror string) (string, error) {
 	return "", fmt.Errorf("%s: resolving series %q needs index_url; install an exact version instead", p.manifest.Name, version)
 }
 
-// ResolveDownload instantiates the platform's URL template and attaches
-// the published checksum.
+// ResolveDownload builds the download plan: from the version index's
+// package list when the index carries packages (selected for the host),
+// otherwise from static URL templates.
 func (p *Provider) ResolveDownload(version, goos, goarch string) (dist.DownloadPlan, error) {
+	if plan, err := p.resolveFromIndex(version, goos, goarch); err == nil {
+		return plan, nil
+	}
+	return p.resolveStatic(version, goos, goarch)
+}
+
+// resolveFromIndex selects a package of the version from the index for
+// the host (OSVersion matched against host facts) and assembles the plan
+// including any dependency archives recorded on the package.
+func (p *Provider) resolveFromIndex(version, goos, goarch string) (dist.DownloadPlan, error) {
+	ix, err := p.EnsureVersions()
+	if err != nil {
+		return dist.DownloadPlan{}, err
+	}
+	vi := ix.Version(version)
+	if vi == nil || !vi.PackagesFetched || len(vi.Packages) == 0 {
+		return dist.DownloadPlan{}, fmt.Errorf("%s: index has no packages for %s", p.manifest.Name, version)
+	}
+	facts := hostfacts.Collect()
+	pkg, err := vi.SelectForHost(goos, goarch, metadata.HostCompat{
+		Distro: metadata.DistroRank(facts.OSID + facts.OSVersionID),
+		Libc:   metadata.LibcRank(facts.Libc + facts.LibcVersion),
+	})
+	if err != nil {
+		return dist.DownloadPlan{}, err
+	}
+	plan := dist.DownloadPlan{
+		Version: version,
+		Main: dist.DownloadFile{
+			URL:     ix.DownloadURL(pkg),
+			SHA256:  pkg.SHA256,
+			Kind:    pkg.Kind,
+			RootDir: pkg.RootDir,
+		},
+	}
+	for _, dep := range pkg.DepURLs {
+		plan.Deps = append(plan.Deps, dist.DownloadFile{URL: dep.URL, SHA256: dep.SHA256, Kind: dep.Kind})
+	}
+	return plan, nil
+}
+
+// resolveStatic instantiates the platform's URL template and attaches
+// the published checksum.
+func (p *Provider) resolveStatic(version, goos, goarch string) (dist.DownloadPlan, error) {
 	if p.manifest.Download == nil || len(p.manifest.Download.Targets) == 0 {
 		return dist.DownloadPlan{}, fmt.Errorf("%s: no download targets configured", p.manifest.Name)
 	}

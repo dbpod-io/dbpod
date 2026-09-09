@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -64,6 +65,18 @@ func testEnv(t *testing.T, engineName string) (globalconfig.EngineManifest, *glo
 		},
 		EngineProfile: validProfile(engineName),
 	}, cfg, &hits
+}
+
+// plannerWasm builds the canned-plan fixture plugin as a wasip1 module.
+func plannerWasm(t *testing.T) string {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "planner.wasm")
+	cmd := exec.Command("go", "build", "-o", out, "./testdata/planner")
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if outBytes, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build planner fixture: %v\n%s", err, outBytes)
+	}
+	return out
 }
 
 func validProfile(engineName string) contract.EngineProfile {
@@ -250,6 +263,43 @@ func TestMountSkipsBroken(t *testing.T) {
 	}
 	if !strings.Contains(warn.String(), "mariadb-broken") {
 		t.Errorf("warning = %q", warn.String())
+	}
+}
+
+// A manifest with a resolve section delegates download resolution to the
+// wasm plugin: the returned plan must pass the allow_hosts validation.
+// A manifest whose index carries packages resolves via the host-aware
+// package selection (mongo pure-config path): per-target packages are
+// picked by the host facts (OSVersion match).
+func TestResolveDownloadFromIndexPackages(t *testing.T) {
+	t.Setenv("DBPOD_HOME", t.TempDir())
+
+	m := globalconfig.EngineManifest{
+		Name:   "mongo-test",
+		Family: "mongodb",
+		IndexURL: func() string {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `{"engine":"mongo-test","versions":{"8.0.12":{"version":"8.0.12","series":"8.0","packages_fetched":true,"packages":[`+
+					`{"filename":"mongodb-linux-x86_64-ubuntu2404-8.0.12.tgz","os":"linux","arch":"amd64","os_version":"ubuntu2404","kind":"tar.gz"},`+
+					`{"filename":"mongodb-linux-x86_64-ubuntu2204-8.0.12.tgz","os":"linux","arch":"amd64","os_version":"ubuntu2204","kind":"tar.gz"}]}}`)
+			}))
+			t.Cleanup(srv.Close)
+			return srv.URL + "/index.json"
+		}(),
+		EngineProfile: validProfile("mongo-test"),
+	}
+	var warn strings.Builder
+	Mount([]globalconfig.EngineManifest{m}, &globalconfig.Config{}, &warn)
+	p, err := dist.ProviderFor("mongo-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// host facts on this machine (darwin) carry no ubuntu target: the
+	// package path must fail with the OSVersion mismatch, not fall through
+	_, err = p.ResolveDownload("8.0.12", "linux", "amd64")
+	if err == nil {
+		t.Error("expected mismatch error for non-linux host facts")
 	}
 }
 

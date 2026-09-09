@@ -7,14 +7,17 @@ import (
 	"github.com/dbpod-io/dbpod/internal/contract"
 	"github.com/dbpod-io/dbpod/internal/dist"
 	"github.com/dbpod-io/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/engine/mongodb"
 	"github.com/dbpod-io/dbpod/internal/engine/mysql"
 	"github.com/dbpod-io/dbpod/internal/globalconfig"
 )
 
 // families maps a declared family to its profile factory. MySQL-family
-// engines (MariaDB, Percona ...) reuse the mysql lifecycle machinery.
+// engines (MariaDB, Percona ...) reuse the mysql lifecycle machinery;
+// mongodb has its own (no init step, mongod.conf, mongosh client).
 var families = map[string]func(contract.EngineProfile) (engine.Engine, error){
-	"mysql": func(p contract.EngineProfile) (engine.Engine, error) { return mysql.New(p), nil },
+	"mysql":   func(p contract.EngineProfile) (engine.Engine, error) { return mysql.New(p), nil },
+	"mongodb": func(contract.EngineProfile) (engine.Engine, error) { return mongodb.New(), nil },
 }
 
 // mountedEngines records the manifest engines mounted in this process,

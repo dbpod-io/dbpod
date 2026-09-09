@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flosch/pongo2/v7"
 	"github.com/dbpod-io/dbpod/internal/contract"
 	"github.com/dbpod-io/dbpod/internal/engine"
 	"github.com/dbpod-io/dbpod/internal/project"
+	"github.com/flosch/pongo2/v7"
 )
 
 //go:embed templates/mysql.cnf.tmpl
@@ -29,8 +29,8 @@ var defaultConfigTemplate string
 // Family invariants: every MySQL-family distribution shares these; they
 // are mechanism, not configuration.
 const (
-	execPaths  = "bin"       // distribution-relative directory of user-facing binaries
-	configFile = "my.cnf"    // server configuration file inside the datadir
+	execPaths  = "bin"        // distribution-relative directory of user-facing binaries
+	configFile = "my.cnf"     // server configuration file inside the datadir
 	socketName = "mysql.sock" // unix socket file name inside the datadir
 )
 

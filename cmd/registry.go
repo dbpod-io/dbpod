@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -247,20 +248,20 @@ func refreshIndex(name, indexURL string, stdout io.Writer) error {
 	ix.FetchedAt = time.Now()
 
 	local, _ := metadata.Load(name)
-	localRev := 0
+	localVer := ""
 	if local != nil {
-		localRev = local.Revision
+		localVer = local.Revision
 	}
-	switch {
-	case ix.Revision > localRev:
+	switch versionCompare(ix.Revision, localVer) {
+	case 1:
 		if err := metadata.Save(name, &ix); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "index updated (revision %d → %d, %d versions)\n", localRev, ix.Revision, len(ix.Versions))
-	case ix.Revision == localRev:
-		fmt.Fprintf(stdout, "index up to date (revision %d, %d versions)\n", localRev, len(ix.Versions))
+		fmt.Fprintf(stdout, "index updated (v%s → v%s, %d versions)\n", localVer, ix.Revision, len(ix.Versions))
+	case 0:
+		fmt.Fprintf(stdout, "index up to date (v%s, %d versions)\n", localVer, len(ix.Versions))
 	default:
-		fmt.Fprintf(stdout, "kept local index (revision %d newer than upstream %d)\n", localRev, ix.Revision)
+		fmt.Fprintf(stdout, "kept local index (v%s newer than upstream v%s)\n", localVer, ix.Revision)
 	}
 	return nil
 }
@@ -324,13 +325,13 @@ func updateManifestFromSource(local *globalconfig.EngineManifest, stdout io.Writ
 		if err := os.WriteFile(path, out, 0o644); err != nil {
 			return false, err
 		}
-		fmt.Fprintf(stdout, "updated %s (v%d → v%d, %d versions in index)\n", local.Name, local.Version, upstream.Version, len(upstream.IndexURL))
+		fmt.Fprintf(stdout, "updated %s (v%s → v%s, %d versions in index)\n", local.Name, local.Version, upstream.Version, len(upstream.IndexURL))
 		return true, nil
 	case upstream.Version == local.Version:
-		fmt.Fprintf(stdout, "%s is up to date (v%d)\n", local.Name, local.Version)
+		fmt.Fprintf(stdout, "%s is up to date (v%s)\n", local.Name, local.Version)
 		return false, nil
 	default:
-		fmt.Fprintf(stdout, "kept local %s (v%d newer than upstream v%d)\n", local.Name, local.Version, upstream.Version)
+		fmt.Fprintf(stdout, "kept local %s (v%s newer than upstream v%s)\n", local.Name, local.Version, upstream.Version)
 		return false, nil
 	}
 }
@@ -581,11 +582,11 @@ func runRegistryLs(stdout io.Writer) error {
 		if metadata.Disabled(name) {
 			status = "disabled"
 		}
-		rev := 0
+		ver := ""
 		if ix, err := metadata.Load(name); err == nil && ix != nil {
-			rev = ix.Revision
+			ver = ix.Revision
 		}
-		tw.row(name, name, fmt.Sprint(rev), "builtin", status)
+		tw.row(name, name, manifestVersion(ver), "builtin", status)
 	}
 
 	for _, m := range manifests {
@@ -619,12 +620,12 @@ func runRegistryLs(stdout io.Writer) error {
 	return nil
 }
 
-// manifestVersion renders a manifest revision for display ("-" when unset).
-func manifestVersion(v int) string {
-	if v == 0 {
+// manifestVersion renders a manifest version for display ("-" when unset).
+func manifestVersion(v string) string {
+	if v == "" {
 		return "-"
 	}
-	return fmt.Sprint(v)
+	return v
 }
 
 // indexOwnership describes who owns the index location: a local snapshot
@@ -742,4 +743,37 @@ func managedHeader(name string) string {
 	return "# managed by dbpod registry — do not edit; this file is replaced by\n" +
 		"# `dbpod registry update " + name + "`. Engine settings go here:\n" +
 		"# https://github.com/dbpod-io/dbpod\n"
+}
+
+// versionCompare compares two major.minor version strings ("0.1"): 1 when
+// a is newer, -1 when b is newer, 0 when equal. Unset ("") counts as "0.0".
+func versionCompare(a, b string) int {
+	if a == "" {
+		a = "0.0"
+	}
+	if b == "" {
+		b = "0.0"
+	}
+	as, bs := strings.SplitN(a, ".", 2), strings.SplitN(b, ".", 2)
+	for i := 0; i < 2; i++ {
+		x, y := part(as, i), part(bs, i)
+		if x != y {
+			if x > y {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
+func part(parts []string, i int) int {
+	if i >= len(parts) {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(parts[i]))
+	if err != nil {
+		return 0
+	}
+	return n
 }
