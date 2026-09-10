@@ -8,7 +8,7 @@ import "testing"
 // (a MySQL-shaped assumption).
 func TestResolveVersionFullPassThrough(t *testing.T) {
 	for _, v := range []string{"17.11", "16.9", "12.22"} {
-		got, err := Provider{}.ResolveVersion(v, "")
+		got, err := Provider{}.ResolveVersion(v)
 		if err != nil {
 			t.Fatalf("ResolveVersion(%q): %v", v, err)
 		}

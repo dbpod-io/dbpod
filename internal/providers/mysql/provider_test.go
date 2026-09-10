@@ -19,7 +19,7 @@ func TestSeriesOf(t *testing.T) {
 		{"26.10.1", true, true, []string{"innovation"}},  // calendar LTS and globally newest
 		{"26.10.1", true, false, []string{"26.10"}},      // calendar LTS, superseded: own series
 	}
-	p := MysqlProvider{}
+	p := Provider{}
 	for _, c := range cases {
 		if got := p.SeriesOf(c.version, c.lts, c.isLatest); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("SeriesOf(%q, lts=%v, latest=%v) = %v, want %v", c.version, c.lts, c.isLatest, got, c.want)

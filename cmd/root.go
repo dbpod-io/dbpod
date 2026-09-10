@@ -13,8 +13,6 @@ import (
 // Version is the dbpod release version.
 const Version = "0.1.0"
 
-var mirror string
-
 var rootCmd = &cobra.Command{
 	Use:   "dbpod",
 	Short: "Lightweight, project-local database management CLI",
@@ -51,8 +49,4 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
-}
-
-func init() {
-	rootCmd.PersistentFlags().StringVar(&mirror, "mirror", "", "mirror base URL replacing the official download host (e.g. https://mirrors.example.com/mysql)")
 }

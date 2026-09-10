@@ -12,7 +12,7 @@ import (
 	"github.com/dbpod-io/dbpod/internal/instance"
 )
 
-func engineGet(name string) (engine.Engine, error) {
+func engineGet(name string) (engine.Provider, error) {
 	return engine.Get(name)
 }
 

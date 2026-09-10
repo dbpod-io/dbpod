@@ -2,6 +2,7 @@
 /dbpod
 /dbpod.exe
 /cmd/metadata-gen/metadata-gen
+/metadata-gen
 
 # test & coverage artifacts
 *.test

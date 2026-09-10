@@ -8,29 +8,43 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/engine"
 	"github.com/dbpod-io/dbpod/internal/fetch"
 	"github.com/dbpod-io/dbpod/internal/globalconfig"
 	"github.com/dbpod-io/dbpod/internal/hostfacts"
 	"github.com/dbpod-io/dbpod/internal/metadata"
+	"github.com/dbpod-io/dbpod/internal/providers/mysql"
 )
 
-// Provider serves a config-declared engine: versions from the configured
-// index (native metadata.Index JSON, 24h cache), download plans from the
-// configured URL templates.
+// Provider is a config-declared engine as one engine.Provider: the
+// lifecycle machinery of the manifest's family (embedded mysql.Engine —
+// the manifest declares family: mysql) plus version resolution and
+// download plans from the configured index (native metadata.Index JSON)
+// and URL templates.
 type Provider struct {
+	*mysql.Engine
+
 	manifest *globalconfig.EngineManifest
 	base     string // file base of the default source ("" = absolute URLs only)
 }
 
-var _ dist.Provider = (*Provider)(nil)
+var _ engine.Provider = (*Provider)(nil)
 
-func (p *Provider) Engine() string { return p.manifest.Name }
+// Name shadows the family engine's name: a config engine carries its own
+// identity (e.g. "mariadb"), not the family's.
+func (p *Provider) Name() string { return p.manifest.Name }
+
+// Install uses the shared dist pipeline (download, verify, extract).
+func (p *Provider) Install(plan engine.DownloadPlan, base string, stdout io.Writer) error {
+	return dist.InstallBase(plan, base, stdout)
+}
 
 // EnsureVersions returns the index from index_url. Once fetched, the
 // cache is used indefinitely — there is no auto-refresh; `dbpod registry
@@ -96,7 +110,7 @@ func (p *Provider) SeriesOf(version string, lts, isLatest bool) []string {
 
 // ResolveVersion maps a series ("11.4") to the newest known full version
 // using the index; full versions pass through even without an index.
-func (p *Provider) ResolveVersion(version, mirror string) (string, error) {
+func (p *Provider) ResolveVersion(version string) (string, error) {
 	if p.manifest.IndexURL != "" {
 		ix, err := p.EnsureVersions()
 		if err != nil {
@@ -124,7 +138,7 @@ func (p *Provider) ResolveVersion(version, mirror string) (string, error) {
 // ResolveDownload builds the download plan: from the version index's
 // package list when the index carries packages (selected for the host),
 // otherwise from static URL templates.
-func (p *Provider) ResolveDownload(version, goos, goarch string) (dist.DownloadPlan, error) {
+func (p *Provider) ResolveDownload(version, goos, goarch string) (engine.DownloadPlan, error) {
 	if plan, err := p.resolveFromIndex(version, goos, goarch); err == nil {
 		return plan, nil
 	}
@@ -134,14 +148,14 @@ func (p *Provider) ResolveDownload(version, goos, goarch string) (dist.DownloadP
 // resolveFromIndex selects a package of the version from the index for
 // the host (OSVersion matched against host facts) and assembles the plan
 // including any dependency archives recorded on the package.
-func (p *Provider) resolveFromIndex(version, goos, goarch string) (dist.DownloadPlan, error) {
+func (p *Provider) resolveFromIndex(version, goos, goarch string) (engine.DownloadPlan, error) {
 	ix, err := p.EnsureVersions()
 	if err != nil {
-		return dist.DownloadPlan{}, err
+		return engine.DownloadPlan{}, err
 	}
 	vi := ix.Version(version)
 	if vi == nil || !vi.PackagesFetched || len(vi.Packages) == 0 {
-		return dist.DownloadPlan{}, fmt.Errorf("%s: index has no packages for %s", p.manifest.Name, version)
+		return engine.DownloadPlan{}, fmt.Errorf("%s: index has no packages for %s", p.manifest.Name, version)
 	}
 	facts := hostfacts.Collect()
 	pkg, err := vi.SelectForHost(goos, goarch, metadata.HostCompat{
@@ -149,11 +163,11 @@ func (p *Provider) resolveFromIndex(version, goos, goarch string) (dist.Download
 		Libc:   metadata.LibcRank(facts.Libc + facts.LibcVersion),
 	})
 	if err != nil {
-		return dist.DownloadPlan{}, err
+		return engine.DownloadPlan{}, err
 	}
-	plan := dist.DownloadPlan{
+	plan := engine.DownloadPlan{
 		Version: version,
-		Main: dist.DownloadFile{
+		Main: engine.DownloadFile{
 			URL:     ix.DownloadURL(pkg),
 			SHA256:  pkg.SHA256,
 			Kind:    pkg.Kind,
@@ -161,20 +175,20 @@ func (p *Provider) resolveFromIndex(version, goos, goarch string) (dist.Download
 		},
 	}
 	for _, dep := range pkg.DepURLs {
-		plan.Deps = append(plan.Deps, dist.DownloadFile{URL: dep.URL, SHA256: dep.SHA256, Kind: dep.Kind})
+		plan.Deps = append(plan.Deps, engine.DownloadFile{URL: dep.URL, SHA256: dep.SHA256, Kind: dep.Kind})
 	}
 	return plan, nil
 }
 
 // resolveStatic instantiates the platform's URL template and attaches
 // the published checksum.
-func (p *Provider) resolveStatic(version, goos, goarch string) (dist.DownloadPlan, error) {
+func (p *Provider) resolveStatic(version, goos, goarch string) (engine.DownloadPlan, error) {
 	if p.manifest.Download == nil || len(p.manifest.Download.Targets) == 0 {
-		return dist.DownloadPlan{}, fmt.Errorf("%s: no download targets configured", p.manifest.Name)
+		return engine.DownloadPlan{}, fmt.Errorf("%s: no download targets configured", p.manifest.Name)
 	}
 	t, ok := p.manifest.Download.Targets[goos+"/"+goarch]
 	if !ok {
-		return dist.DownloadPlan{}, fmt.Errorf("%s: no package for %s/%s (configured: %v)", p.manifest.Name, goos, goarch, targetKeys(p.manifest.Download.Targets))
+		return engine.DownloadPlan{}, fmt.Errorf("%s: no package for %s/%s (configured: %v)", p.manifest.Name, goos, goarch, targetKeys(p.manifest.Download.Targets))
 	}
 	rel := strings.ReplaceAll(t.URL, "{version}", version)
 	if strings.Contains(rel, "{series}") {
@@ -188,11 +202,11 @@ func (p *Provider) resolveStatic(version, goos, goarch string) (dist.DownloadPla
 	}
 	url, err := p.resolveURL(rel)
 	if err != nil {
-		return dist.DownloadPlan{}, err
+		return engine.DownloadPlan{}, err
 	}
-	plan := dist.DownloadPlan{
+	plan := engine.DownloadPlan{
 		Version: version,
-		Main: dist.DownloadFile{
+		Main: engine.DownloadFile{
 			URL:  url,
 			Kind: t.Kind,
 		},
@@ -200,7 +214,7 @@ func (p *Provider) resolveStatic(version, goos, goarch string) (dist.DownloadPla
 	if name := p.manifest.Download.Checksums; name != "" {
 		sum, err := p.checksumOf(dirOf(rel), name, baseOf(rel))
 		if err != nil {
-			return dist.DownloadPlan{}, err
+			return engine.DownloadPlan{}, err
 		}
 		plan.Main.SHA256 = sum
 	}

@@ -1,8 +1,8 @@
-// Package postgres implements the dist.Provider for PostgreSQL:
+// Package postgres is the builtin provider for PostgreSQL. The version/
+// download half resolves from the generated index (versions.json,
+// committed by cmd/pg-metadata-gen — version probing is a generation
+// step, never runtime); the lifecycle half is engine.go.
 //
-//   - version discovery comes from the generated index
-//     (versions.json, committed by cmd/pg-metadata-gen) — version probing
-//     is a generation step, never runtime
 //   - linux download: PGDG repository resolution at install time (baseline
 //     selection, server/client debs/rpms extracted into a portable engine
 //     directory) — internal/pgdg
@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/engine"
 	"github.com/dbpod-io/dbpod/internal/metadata"
 	"github.com/dbpod-io/dbpod/internal/pgdg"
 )
@@ -23,14 +23,14 @@ import (
 //go:embed versions.json
 var versionsJSON []byte
 
+// Provider is the builtin postgres engine.Provider: generated version
+// index, PGDG/EDB download plans, lifecycle machinery (engine.go).
 type Provider struct{}
 
 func init() {
 	metadata.RegisterEmbedded("postgres", versionsJSON, false)
-	dist.RegisterProvider(Provider{})
+	engine.Register(Provider{})
 }
-
-func (Provider) Engine() string { return "postgres" }
 
 // SeriesOf: PostgreSQL majors ARE the series — "17.11" belongs to
 // series "17" (minor releases are patches).
@@ -56,7 +56,7 @@ func (Provider) EnsureVersions() (*metadata.Index, error) {
 
 // ResolveVersion maps a possibly-series version ("17") to a full version
 // ("17.11") using the index.
-func (Provider) ResolveVersion(version, mirror string) (string, error) {
+func (Provider) ResolveVersion(version string) (string, error) {
 	if strings.Contains(version, ".") {
 		return version, nil // already full (series = bare major)
 	}
@@ -73,33 +73,33 @@ func (Provider) ResolveVersion(version, mirror string) (string, error) {
 	return "", fmt.Errorf("no known version in series %s for postgres", version)
 }
 
-func (Provider) ResolveDownload(version, goos, goarch string) (dist.DownloadPlan, error) {
+func (Provider) ResolveDownload(version, goos, goarch string) (engine.DownloadPlan, error) {
 	switch goos {
 	case "linux":
 		return pgdg.Resolve(version)
 	case "darwin", "windows":
 		return resolveEDB(version, goos, goarch)
 	default:
-		return dist.DownloadPlan{}, fmt.Errorf("unsupported platform %s/%s for postgres", goos, goarch)
+		return engine.DownloadPlan{}, fmt.Errorf("unsupported platform %s/%s for postgres", goos, goarch)
 	}
 }
 
 // resolveEDB returns the EDB portable zip of a PG version for win/macOS,
 // as recorded in the generated index.
-func resolveEDB(version, goos, goarch string) (dist.DownloadPlan, error) {
+func resolveEDB(version, goos, goarch string) (engine.DownloadPlan, error) {
 	ix, err := versionsIndex()
 	if err != nil {
-		return dist.DownloadPlan{}, err
+		return engine.DownloadPlan{}, err
 	}
 	vi := ix.Version(version)
 	if vi == nil {
-		return dist.DownloadPlan{}, fmt.Errorf("postgres %s not in the version index (run: dbpod registry update postgres)", version)
+		return engine.DownloadPlan{}, fmt.Errorf("postgres %s not in the version index (run: dbpod registry update postgres)", version)
 	}
 	for _, p := range vi.Packages {
 		if p.OS == goos && p.Arch == goarch {
-			return dist.DownloadPlan{
+			return engine.DownloadPlan{
 				Version: version,
-				Main: dist.DownloadFile{
+				Main: engine.DownloadFile{
 					URL:     p.URL,
 					SHA256:  p.SHA256,
 					Size:    p.Size,
@@ -109,5 +109,5 @@ func resolveEDB(version, goos, goarch string) (dist.DownloadPlan, error) {
 			}, nil
 		}
 	}
-	return dist.DownloadPlan{}, fmt.Errorf("no EDB package of postgres %s for %s/%s", version, goos, goarch)
+	return engine.DownloadPlan{}, fmt.Errorf("no EDB package of postgres %s for %s/%s", version, goos, goarch)
 }

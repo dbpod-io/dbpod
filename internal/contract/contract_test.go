@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/engine"
 	"github.com/dbpod-io/dbpod/internal/metadata"
 )
 
@@ -24,7 +24,7 @@ func TestFixturesDecode(t *testing.T) {
 		}
 	})
 	t.Run("resolve-download", func(t *testing.T) {
-		var plan dist.DownloadPlan
+		var plan engine.DownloadPlan
 		load(t, "testdata/plan.json", &plan)
 		if plan.Main.Kind != "tar.gz" || plan.Main.URL == "" {
 			t.Errorf("plan = %+v", plan)

@@ -27,7 +27,7 @@ func TestLiveInstallRealDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Install(ref, "", os.Stderr); err != nil {
+	if err := Install(ref, os.Stderr); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 	if !Installed(engine, version) {

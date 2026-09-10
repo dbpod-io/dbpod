@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/dbpod-io/dbpod/internal/contract"
-	"github.com/dbpod-io/dbpod/internal/dist"
 	"github.com/dbpod-io/dbpod/internal/engine"
 	"github.com/dbpod-io/dbpod/internal/globalconfig"
 	"github.com/dbpod-io/dbpod/internal/metadata"
@@ -102,21 +101,17 @@ func TestMountAndLifecycle(t *testing.T) {
 		t.Fatalf("unexpected warnings: %s", warn.String())
 	}
 
-	// engine registered with profile data
-	eng, err := engine.Get("mariadb-1")
+	// provider registered (family lifecycle + versions in one object)
+	p, err := engine.Get("mariadb-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, client, admin := eng.BinaryNames()
+	server, client, admin := p.BinaryNames()
 	if server != "mariadbd" || client != "mariadb" || admin != "mariadb-admin" {
 		t.Errorf("binary names = %s/%s/%s", server, client, admin)
 	}
 
-	// provider registered, versions cached after first fetch
-	p, err := dist.ProviderFor("mariadb-1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// versions cached after first fetch
 	if _, err := p.EnsureVersions(); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +132,7 @@ func TestMountAndLifecycle(t *testing.T) {
 	}
 
 	// series resolution from the index
-	v, err := p.ResolveVersion("11.4", "")
+	v, err := p.ResolveVersion("11.4")
 	if err != nil || v != "11.4.5" {
 		t.Errorf("ResolveVersion(11.4) = %q, %v", v, err)
 	}
@@ -168,7 +163,7 @@ func TestResolveDownload(t *testing.T) {
 	m.Download.Checksums = "" // the fake archive tree has no sums for this path
 	var warn strings.Builder
 	Mount([]globalconfig.EngineManifest{m}, cfg, &warn)
-	p, err := dist.ProviderFor("mariadb-2")
+	p, err := engine.Get("mariadb-2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,14 +228,14 @@ func TestExactVersionWithoutIndex(t *testing.T) {
 	}}
 	var warn strings.Builder
 	Mount([]globalconfig.EngineManifest{m}, cfg, &warn)
-	p, err := dist.ProviderFor("mariadb-3")
+	p, err := engine.Get("mariadb-3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.ResolveVersion("11.4.5", ""); err != nil || v != "11.4.5" {
+	if v, err := p.ResolveVersion("11.4.5"); err != nil || v != "11.4.5" {
 		t.Errorf("exact version passthrough = %q, %v", v, err)
 	}
-	if _, err := p.ResolveVersion("11.4", ""); err == nil {
+	if _, err := p.ResolveVersion("11.4"); err == nil {
 		t.Error("series without index_url should error")
 	}
 }
@@ -290,7 +285,7 @@ func TestResolveDownloadFromIndexPackages(t *testing.T) {
 	}
 	var warn strings.Builder
 	Mount([]globalconfig.EngineManifest{m}, &globalconfig.Config{}, &warn)
-	p, err := dist.ProviderFor("mongo-test")
+	p, err := engine.Get("mongo-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +307,7 @@ func TestMountNeverShadowsBuiltin(t *testing.T) {
 	}
 	var warn strings.Builder
 	Mount([]globalconfig.EngineManifest{m}, &globalconfig.Config{}, &warn)
-	p, err := dist.ProviderFor("mysql")
+	p, err := engine.Get("mysql")
 	if err != nil {
 		t.Fatal(err)
 	}

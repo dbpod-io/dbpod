@@ -383,6 +383,12 @@ func runRegistryAdd(src string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// the user layer of the global config (may carry source settings for
+	// this engine later; validation itself needs no base)
+	cfg, _ := globalconfig.Load()
+	if err != nil {
+		return err
+	}
 	m, err := globalconfig.ParseManifest(data)
 	if err != nil {
 		return err
@@ -413,7 +419,7 @@ func runRegistryAdd(src string, stdout io.Writer) error {
 	if isURL(src) {
 		m.Source = src
 	}
-	if err := external.Validate(*m); err != nil {
+	if err := external.Validate(*m, cfg); err != nil {
 		return fmt.Errorf("manifest invalid: %w", err)
 	}
 	dir, err := globalconfig.EnginesDir()

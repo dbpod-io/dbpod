@@ -284,17 +284,17 @@ func projectHome(t *testing.T) string {
 
 func TestRegistryGuardBlocksOnInstances(t *testing.T) {
 	t.Setenv("DBPOD_HOME", t.TempDir())
-	fixture := writeManifestFixture(t)
+	fixture := writeManifestFixtureNamed(t, "mariadb-g")
 	if err := runRegistryAdd(fixture, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 
 	// an instance record referencing the engine blocks rm and disable
-	writeInstanceRecord(t, "pg1", "mariadb")
-	if err := runRegistryRm([]string{"mariadb"}, io.Discard); err == nil || !strings.Contains(err.Error(), "pg1") {
+	writeInstanceRecord(t, "pg1", "mariadb-g")
+	if err := runRegistryRm([]string{"mariadb-g"}, io.Discard); err == nil || !strings.Contains(err.Error(), "pg1") {
 		t.Errorf("rm guard err = %v", err)
 	}
-	if err := runRegistryToggle([]string{"mariadb"}, io.Discard, true); err == nil || !strings.Contains(err.Error(), "pg1") {
+	if err := runRegistryToggle([]string{"mariadb-g"}, io.Discard, true); err == nil || !strings.Contains(err.Error(), "pg1") {
 		t.Errorf("disable guard err = %v", err)
 	}
 }
@@ -434,7 +434,7 @@ func TestRegistryUpdateManifestFromSource(t *testing.T) {
 
 func TestRegistryLsStates(t *testing.T) {
 	t.Setenv("DBPOD_HOME", t.TempDir())
-	fixture := writeManifestFixture(t)
+	fixture := writeManifestFixtureNamed(t, "mariadb-ls")
 	if err := runRegistryAdd(fixture, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestRegistryLsStates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte("name: [unclosed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runRegistryToggle([]string{"mariadb"}, io.Discard, true); err != nil {
+	if err := runRegistryToggle([]string{"mariadb-ls"}, io.Discard, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -458,7 +458,7 @@ func TestRegistryLsStates(t *testing.T) {
 	if err := runRegistryLs(&out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"mariadb", "disabled", "invalid"} {
+	for _, want := range []string{"mariadb-ls", "disabled", "invalid"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("ls output missing %q:\n%s", want, out.String())
 		}
@@ -479,4 +479,15 @@ func writeInstanceRecord(t *testing.T, name, engine string) {
 	if err := os.WriteFile(filepath.Join(dir, name+".json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// writeManifestFixtureNamed writes the test manifest with a custom engine name.
+func writeManifestFixtureNamed(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name+".yaml")
+	s := strings.Replace(testManifestYAML, "name: mariadb", "name: "+name, 1)
+	if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

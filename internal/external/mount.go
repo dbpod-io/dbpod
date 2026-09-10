@@ -5,81 +5,60 @@ import (
 	"io"
 
 	"github.com/dbpod-io/dbpod/internal/contract"
-	"github.com/dbpod-io/dbpod/internal/dist"
 	"github.com/dbpod-io/dbpod/internal/engine"
-	"github.com/dbpod-io/dbpod/internal/engine/mongodb"
-	"github.com/dbpod-io/dbpod/internal/engine/mysql"
 	"github.com/dbpod-io/dbpod/internal/globalconfig"
+	"github.com/dbpod-io/dbpod/internal/providers/mysql"
 )
 
-// families maps a declared family to its profile factory. MySQL-family
-// engines (MariaDB, Percona ...) reuse the mysql lifecycle machinery;
-// mongodb has its own (no init step, mongod.conf, mongosh client).
-var families = map[string]func(contract.EngineProfile) (engine.Engine, error){
-	"mysql":   func(p contract.EngineProfile) (engine.Engine, error) { return mysql.New(p), nil },
-	"mongodb": func(contract.EngineProfile) (engine.Engine, error) { return mongodb.New(), nil },
-}
-
 // mountedEngines records the manifest engines mounted in this process,
-// so Validate can tell them apart from built-in engines.
+// so Validate can tell them apart from builtin engines.
 var mountedEngines = map[string]bool{}
 
-// Mount registers every config-declared engine from its manifest. User
-// settings (mirrors, sources) come from the user layer — the
-// providers.<name> block of the global config. A broken manifest is
-// reported to warn and skipped — it must not take the whole CLI down.
+// Mount registers every config-declared engine from its manifest as one
+// engine.Provider (family lifecycle + manifest versions/downloads). A
+// broken manifest is reported to warn and skipped — it must not take the
+// whole CLI down.
 func Mount(manifests []globalconfig.EngineManifest, cfg *globalconfig.Config, warn io.Writer) {
 	for _, m := range manifests {
-		eng, prov, err := buildEngine(m, cfg)
+		prov, err := buildProvider(m, cfg)
 		if err != nil {
 			fmt.Fprintf(warn, "note: engine %q skipped: %v\n", m.Name, err)
 			continue
 		}
 		mountedEngines[m.Name] = true
-		engine.Register(eng)
-		dist.RegisterProvider(prov)
+		engine.Register(prov)
 	}
 }
 
-// Validate checks a manifest against the mount rules (known family,
-// valid profile) without registering anything.
-func Validate(m globalconfig.EngineManifest) error {
-	if _, err := dist.ProviderFor(m.Name); err == nil && !mountedEngines[m.Name] {
-		return fmt.Errorf("built-in engine takes precedence")
+// Validate checks a manifest against the mount rules (no builtin
+// takeover, valid profile) without registering anything.
+func Validate(m globalconfig.EngineManifest, cfg *globalconfig.Config) error {
+	if _, err := engine.Get(m.Name); err == nil && !mountedEngines[m.Name] {
+		return fmt.Errorf("builtin engine takes precedence")
 	}
-	if _, ok := families[m.Family]; !ok {
-		return fmt.Errorf("unknown family %q (supported: mysql)", m.Family)
-	}
-	prof := m.EngineProfile
-	prof.Engine = m.Name
-	prof.ContractVersion = contract.Version
-	return prof.Validate()
+	_, err := buildProvider(m, cfg)
+	return err
 }
 
-// buildEngine instantiates the engine and provider of a manifest.
-func buildEngine(m globalconfig.EngineManifest, cfg *globalconfig.Config) (engine.Engine, dist.Provider, error) {
-	if _, err := dist.ProviderFor(m.Name); err == nil {
-		return nil, nil, fmt.Errorf("built-in engine takes precedence")
-	}
-	build, ok := families[m.Family]
-	if !ok {
-		return nil, nil, fmt.Errorf("unknown family %q (supported: mysql)", m.Family)
+// buildProvider instantiates the provider of a manifest. Every
+// config-declared engine uses the profile-driven family machinery
+// (internal/providers/mysql): the manifest fully describes the lifecycle,
+// so adding an engine never changes the main project.
+func buildProvider(m globalconfig.EngineManifest, cfg *globalconfig.Config) (engine.Provider, error) {
+	if _, err := engine.Get(m.Name); err == nil && !mountedEngines[m.Name] {
+		return nil, fmt.Errorf("builtin engine takes precedence")
 	}
 	prof := m.EngineProfile
 	prof.Engine = m.Name
 	prof.ContractVersion = contract.Version
 	if err := prof.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("invalid profile: %w", err)
+		return nil, fmt.Errorf("invalid profile: %w", err)
 	}
-	eng, err := build(prof)
-	if err != nil {
-		return nil, nil, err
-	}
-	prov := &Provider{
+	return &Provider{
+		Engine:   mysql.New(prof),
 		manifest: &m,
 		base:     userSourceBase(m.Name, cfg),
-	}
-	return eng, prov, nil
+	}, nil
 }
 
 // userSourceBase resolves the file base of the engine's user-layer

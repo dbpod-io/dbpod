@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/engine"
 	"github.com/ulikunitz/xz"
 )
 
@@ -91,7 +91,7 @@ func MajorOf(version string) string {
 
 // Resolve returns the linux DownloadPlan of a PG version, choosing the
 // baseline with the lowest glibc that carries the version.
-func Resolve(version string) (dist.DownloadPlan, error) {
+func Resolve(version string) (engine.DownloadPlan, error) {
 	major := MajorOf(version)
 
 	// yum baselines first (lowest glibc: el7 → el8 → el9)
@@ -111,16 +111,16 @@ func Resolve(version string) (dist.DownloadPlan, error) {
 		}
 		return archivePackage(version, refs, debExtractRules(major))
 	}
-	return dist.DownloadPlan{}, fmt.Errorf("no PGDG baseline carries postgres %s", major)
+	return engine.DownloadPlan{}, fmt.Errorf("no PGDG baseline carries postgres %s", major)
 }
 
 // archivePackage assembles the linux DownloadPlan for a set of archive
 // downloads (.deb or .rpm); refs[0] is the main archive, the rest ride
 // along as dependencies.
-func archivePackage(version string, refs []Ref, rules [][2]string) (dist.DownloadPlan, error) {
-	plan := dist.DownloadPlan{Version: version}
+func archivePackage(version string, refs []Ref, rules [][2]string) (engine.DownloadPlan, error) {
+	plan := engine.DownloadPlan{Version: version}
 	for i, d := range refs {
-		f := dist.DownloadFile{
+		f := engine.DownloadFile{
 			URL:  d.URL,
 			Kind: "deb",
 		}

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dbpod-io/dbpod/internal/dist"
+	"github.com/dbpod-io/dbpod/internal/engine"
 	"github.com/dbpod-io/dbpod/internal/instance"
 	"github.com/dbpod-io/dbpod/internal/metadata"
 	"github.com/spf13/cobra"
@@ -187,31 +188,31 @@ func runEngineLs() error {
 	// merge every engine catalog + local-only installs into the entry universe
 	var entries []lsEntry
 	seen := map[string]bool{}
-	for _, cat := range dist.Providers() {
-		if metadata.Disabled(cat.Engine()) {
+	for _, cat := range engine.Providers() {
+		if metadata.Disabled(cat.Name()) {
 			continue // disabled via `registry disable`: hidden from the catalog
 		}
 		ix, err := cat.EnsureVersions()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "note: cannot fetch %s versions: %v\n", cat.Engine(), err)
+			fmt.Fprintf(os.Stderr, "note: cannot fetch %s versions: %v\n", cat.Name(), err)
 			continue
 		}
 		var catEntries []lsEntry
 		for _, v := range ix.ListVersions() {
 			vi := ix.Version(v)
-			installed := installedSet[cat.Engine()+"@"+v]
+			installed := installedSet[cat.Name()+"@"+v]
 			avail := false
 			if vi != nil {
 				_, serr := vi.Select(runtime.GOOS, runtime.GOARCH)
 				avail = serr == nil
 			}
 			catEntries = append(catEntries, lsEntry{
-				Engine: cat.Engine(), Version: v, LTS: vi.LTS, Installed: installed, Available: avail,
+				Engine: cat.Name(), Version: v, LTS: vi.LTS, Installed: installed, Available: avail,
 			})
 			seen[v] = true
 		}
 		for _, ref := range local { // installed versions missing from the catalog
-			if ref.Engine != cat.Engine() || seen[ref.Version] {
+			if ref.Engine != cat.Name() || seen[ref.Version] {
 				continue
 			}
 			catEntries = append(catEntries, lsEntry{
@@ -294,7 +295,7 @@ var engineInstallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return dist.Install(ref, mirror, os.Stdout)
+		return dist.Install(ref, os.Stdout)
 	},
 }
 

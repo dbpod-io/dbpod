@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/dbpod-io/dbpod/internal/engine"
 	"github.com/dbpod-io/dbpod/internal/fetch"
 	"github.com/dbpod-io/dbpod/internal/project"
 )
@@ -177,19 +178,19 @@ func Size(engine, version string) int64 {
 	return total
 }
 
-// Install downloads (via mirror when non-empty) and extracts engine@version.
-// Series versions like "8.0" resolve to the latest known patch release.
-func Install(ref PackageRef, mirror string, stdout io.Writer) error {
+// Install resolves ref against the engine's provider (series like "8.0"
+// resolve to the latest known patch) and fills the versions cache through
+// the provider's install pipeline.
+func Install(ref PackageRef, stdout io.Writer) error {
 	if Installed(ref.Engine, ref.Version) {
 		fmt.Fprintf(stdout, "%s already installed\n", ref)
 		return nil
 	}
-
-	prov, err := ProviderFor(ref.Engine)
+	prov, err := engine.Get(ref.Engine)
 	if err != nil {
 		return err
 	}
-	version, err := prov.ResolveVersion(ref.Version, mirror)
+	version, err := prov.ResolveVersion(ref.Version)
 	if err != nil {
 		return err
 	}
@@ -198,15 +199,36 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "%s already installed\n", ref)
 		return nil
 	}
-
 	plan, err := prov.ResolveDownload(ref.Version, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
 	}
+	base, err := imageRoot(ref.Engine, ref.Version)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "resolved %s -> %s\n", ref, ref.Version)
+	if err := os.RemoveAll(base); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return err
+	}
+	if err := prov.Install(plan, base, stdout); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "installed %s\n", ref)
+	return nil
+}
+
+// InstallBase is the shared install pipeline most providers delegate to:
+// download (retrying the published fallback), verify checksums, extract
+// (deb/rpm rule pipelines or the generic extractor), write the
+// .dbpod-root marker, merge dependency archives and apply platform fixes.
+func InstallBase(plan engine.DownloadPlan, base string, stdout io.Writer) error {
 	main := plan.Main
 	url := main.URL
 	mainFallback := main.FallbackURL
-	fmt.Fprintf(stdout, "resolved %s -> %s (%s)\n", ref, ref.Version, filepath.Base(url))
 	fmt.Fprintf(stdout, "downloading %s\n", url)
 
 	archive, err := fetchDownload(url, main.MD5, main.Size, stdout)
@@ -220,17 +242,6 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 		return err
 	}
 	defer os.Remove(archive)
-
-	base, err := imageRoot(ref.Engine, ref.Version)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(base); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		return err
-	}
 
 	// PGDG-style packages: companion dependency archives (shared libs) are
 	// downloaded and extracted alongside the main archive
@@ -261,7 +272,6 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 		if err := extractEnginePackage(main.Kind, archive, depPaths, base, main.ExtractRules); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "installed %s\n", ref)
 		return nil
 	}
 
@@ -286,7 +296,6 @@ func Install(ref PackageRef, mirror string, stdout io.Writer) error {
 	}
 
 	postInstall(base, stdout)
-	fmt.Fprintf(stdout, "installed %s\n", ref)
 	return nil
 }
 

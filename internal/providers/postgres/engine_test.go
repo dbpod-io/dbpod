@@ -21,7 +21,7 @@ func testOpts(root string, port int) engine.Options {
 func TestWriteConfigRendersTemplates(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "inst")
 	opts := testOpts(root, 5433)
-	e := &Engine{}
+	var e Provider
 
 	conf, err := e.WriteConfig(opts)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestWriteConfigRendersTemplates(t *testing.T) {
 func TestServerArgsAndSocket(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "inst")
 	opts := testOpts(root, 5433)
-	e := &Engine{}
+	var e Provider
 
 	args := e.ServerArgs(opts)
 	joined := strings.Join(args, " ")
@@ -85,7 +85,7 @@ func TestServerArgsAndSocket(t *testing.T) {
 func TestClientAndExecArgs(t *testing.T) {
 	root := t.TempDir()
 	opts := testOpts(root, 5433)
-	e := &Engine{}
+	var e Provider
 
 	client := e.ClientArgs(opts)
 	if !strings.Contains(strings.Join(client, " "), "-U postgres") ||
@@ -103,7 +103,7 @@ func TestClientAndExecArgs(t *testing.T) {
 func TestDataDirInitialized(t *testing.T) {
 	root := t.TempDir()
 	opts := testOpts(root, 5433)
-	e := &Engine{}
+	var e Provider
 
 	if e.DataDirInitialized(opts) {
 		t.Error("empty root should not be initialized")
@@ -123,7 +123,7 @@ func TestEnvInjectsLibraryPath(t *testing.T) {
 	root := t.TempDir()
 	opts := testOpts(root, 5433)
 	opts.BinDir = filepath.Join(root, "basedir", "bin")
-	e := &Engine{}
+	var e Provider
 
 	env := e.Env(opts)
 	if len(env) != 1 {

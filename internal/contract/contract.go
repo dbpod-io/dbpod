@@ -69,6 +69,25 @@ type EngineProfile struct {
 	// Config is the server configuration file content (a template,
 	// rendered with the same variables and written into the datadir).
 	Config string `json:"config" yaml:"config"`
+
+	// --- structural declaration (generic server manifests) ---
+	// MySQL-family manifests omit these: the family provides the
+	// invariants. Generic server manifests declare them explicitly.
+
+	// ExecPaths are distribution-relative directories holding the
+	// binaries (default ["bin"]).
+	ExecPaths []string `json:"exec_paths,omitempty" yaml:"exec_paths,omitempty"`
+
+	// DataMarkers identify initialized storage (any one match counts).
+	DataMarkers []string `json:"data_markers,omitempty" yaml:"data_markers,omitempty"`
+
+	// ConfigFile is the server configuration file name inside the
+	// datadir (default "my.cnf").
+	ConfigFile string `json:"config_file,omitempty" yaml:"config_file,omitempty"`
+
+	// SocketName is the unix socket file name (default "mysql.sock";
+	// TCP-only engines leave it and the socket variable unused).
+	SocketName string `json:"socket_name,omitempty" yaml:"socket_name,omitempty"`
 }
 
 // Validate checks the data-level invariants of a profile. Security

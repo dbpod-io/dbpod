@@ -387,9 +387,13 @@ func freePort() (int, error) {
 }
 
 // resolveVersion turns a possibly-series version ("8.0") into a full version
-// (delegates to the engine catalog).
+// (delegates to the engine's provider).
 func resolveVersion(ref dist.PackageRef) (string, error) {
-	return dist.ResolveVersion(ref.Engine, ref.Version, mirror)
+	p, err := engine.Get(ref.Engine)
+	if err != nil {
+		return "", err
+	}
+	return p.ResolveVersion(ref.Version)
 }
 
 // ensureEngine installs engine@version when missing.
@@ -398,7 +402,7 @@ func ensureEngine(engineName, version string) error {
 		return nil
 	}
 	fmt.Fprintf(os.Stdout, "engine %s@%s not installed yet\n", engineName, version)
-	return dist.Install(dist.PackageRef{Engine: engineName, Version: version}, mirror, os.Stdout)
+	return dist.Install(dist.PackageRef{Engine: engineName, Version: version}, os.Stdout)
 }
 
 func printInstances() error {

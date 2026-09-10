@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/dbpod-io/dbpod/internal/engine"
+	"github.com/dbpod-io/dbpod/internal/metadata"
 	"github.com/dbpod-io/dbpod/internal/project"
 )
 
@@ -19,6 +20,23 @@ import (
 type fakeEngine struct{}
 
 func (f *fakeEngine) Name() string { return "fake" }
+
+// distribution surface (unused by the lifecycle tests)
+func (f *fakeEngine) EnsureVersions() (*metadata.Index, error) {
+	return &metadata.Index{}, nil
+}
+
+func (f *fakeEngine) SeriesOf(version string, lts, isLatest bool) []string { return nil }
+
+func (f *fakeEngine) ResolveVersion(version string) (string, error) { return version, nil }
+
+func (f *fakeEngine) ResolveDownload(version, goos, goarch string) (engine.DownloadPlan, error) {
+	return engine.DownloadPlan{}, nil
+}
+
+func (f *fakeEngine) Install(plan engine.DownloadPlan, base string, stdout io.Writer) error {
+	return nil
+}
 
 func (f *fakeEngine) BinaryNames() (server, client, admin string) {
 	return "mysqld", "mysql", "mysqladmin"

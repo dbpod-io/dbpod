@@ -1,9 +1,13 @@
-// Package mysql implements the engine.Engine interface for the MySQL
-// family (MySQL, and external engines such as MariaDB via a
+// Package mysql implements the lifecycle machinery of the MySQL family
+// (MySQL itself, and external engines such as MariaDB via a
 // contract.EngineProfile — see internal/external). The profile defines
 // each lifecycle action as a command-line template; this package owns
 // the family invariants (layout, socket, config rendering, execution
 // variables) and runs the commands.
+//
+// The builtin MySQL provider (versions + download plans + lifecycle in
+// one engine.Provider) is Provider in provider.go; external engines wrap
+// Engine directly with their own manifest-driven version resolution.
 package mysql
 
 import (
@@ -26,22 +30,17 @@ import (
 //go:embed templates/mysql.cnf.tmpl
 var defaultConfigTemplate string
 
-// Family invariants: every MySQL-family distribution shares these; they
-// are mechanism, not configuration.
-const (
-	execPaths  = "bin"        // distribution-relative directory of user-facing binaries
-	configFile = "my.cnf"     // server configuration file inside the datadir
-	socketName = "mysql.sock" // unix socket file name inside the datadir
+// family defaults for the structural fields a profile may leave unset:
+// every MySQL-family distribution shares these (mechanism, not config).
+var (
+	defaultExecPaths  = []string{"bin"}
+	defaultConfigFile = "my.cnf"
+	defaultSocketName = "mysql.sock"
+	// the union over the family (MySQL 8 system tablespace, MariaDB
+	// InnoDB/Aria): any one marker counts as initialized, so the union
+	// covers every family member
+	defaultDataMarkers = []string{"mysql.ibd", "ib_bufferpool", "ibdata1", "aria_log_control"}
 )
-
-// dataMarkers identify an initialized data directory: the union over the
-// family (MySQL 8 system tablespace, MariaDB InnoDB/Aria). Any one match
-// counts as initialized, so the union covers every family member.
-var dataMarkers = []string{"mysql.ibd", "ib_bufferpool", "ibdata1", "aria_log_control"}
-
-func init() {
-	engine.Register(New(DefaultProfile()))
-}
 
 // DefaultProfile is the built-in MySQL profile. All connections go
 // through TCP: the host variable follows the instance bind address, so
@@ -60,8 +59,8 @@ func DefaultProfile() contract.EngineProfile {
 	return p
 }
 
-// Engine implements engine.Engine for a MySQL-family profile. The zero
-// value is the built-in MySQL engine.
+// Engine implements the lifecycle half of engine.Provider for a
+// MySQL-family profile. The zero value is the built-in MySQL engine.
 type Engine struct {
 	profile *contract.EngineProfile
 }
@@ -69,6 +68,25 @@ type Engine struct {
 // New builds a family engine from a profile (validated by the caller).
 func New(p contract.EngineProfile) *Engine {
 	return &Engine{profile: &p}
+}
+
+// effective returns the profile with structural defaults applied for
+// fields the manifest left unset (mysql-family invariants).
+func (e *Engine) effective() *contract.EngineProfile {
+	p := *e.prof()
+	if len(p.ExecPaths) == 0 {
+		p.ExecPaths = defaultExecPaths
+	}
+	if p.ConfigFile == "" {
+		p.ConfigFile = defaultConfigFile
+	}
+	if p.SocketName == "" {
+		p.SocketName = defaultSocketName
+	}
+	if len(p.DataMarkers) == 0 {
+		p.DataMarkers = defaultDataMarkers
+	}
+	return &p
 }
 
 func (e *Engine) prof() *contract.EngineProfile {
@@ -89,16 +107,16 @@ func (e *Engine) BinaryNames() (server, client, admin string) {
 }
 
 // ExecPaths: the family ships its user-facing binaries in bin/.
-func (e *Engine) ExecPaths() []string { return []string{execPaths} }
+func (e *Engine) ExecPaths() []string { return e.effective().ExecPaths }
 
 func (e *Engine) DataDirInitialized(opts engine.Options) bool {
-	return engine.LooksInitialized(filepath.Join(opts.DataDir, "data"), dataMarkers...)
+	return engine.LooksInitialized(filepath.Join(opts.DataDir, "data"), e.effective().DataMarkers...)
 }
 
 // configPath returns the rendered server configuration file (kept inside
 // the datadir so an instance is fully self-contained).
 func (e *Engine) configPath(opts engine.Options) string {
-	return filepath.Join(opts.DataDir, configFile)
+	return filepath.Join(opts.DataDir, e.effective().ConfigFile)
 }
 
 // socketPath resolves the unix socket path of an instance: explicit
@@ -108,7 +126,7 @@ func (e *Engine) socketPath(opts engine.Options) string {
 	if opts.Socket != "" {
 		return opts.Socket
 	}
-	socket := filepath.Join(opts.DataDir, socketName)
+	socket := filepath.Join(opts.DataDir, e.effective().SocketName)
 	if len(socket) > 90 { // unix socket sun_path limit (~104) with margin
 		sum := sha1.Sum([]byte(socket))
 		socket = filepath.Join(os.TempDir(), fmt.Sprintf("dbpod-%x.sock", sum[:6]))
@@ -278,13 +296,19 @@ func (e *Engine) runCommand(opts engine.Options, tmpl string, extra map[string]a
 	return nil
 }
 
-// InitDataDir runs the init command (root account with empty password).
+// InitDataDir prepares the instance directories and runs the init
+// command (root account with empty password). An engine whose manifest
+// declares no init command self-initializes on first start (e.g.
+// mongod): only the directories and config are prepared.
 func (e *Engine) InitDataDir(opts engine.Options) error {
 	if err := os.MkdirAll(opts.DataDir, 0o755); err != nil {
 		return err
 	}
 	if _, err := e.WriteConfig(opts); err != nil {
 		return err
+	}
+	if strings.TrimSpace(e.prof().Init) == "" {
+		return nil // self-initializing engine
 	}
 	return e.runCommand(opts, e.prof().Init, nil)
 }
