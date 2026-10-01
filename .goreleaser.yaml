@@ -23,10 +23,8 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w
-        # .Tag keeps the v prefix (v0.1.0); .Version would strip it
-        -X github.com/dbpod-io/dbpod/cmd.Version={{ .Tag }}
-        -X github.com/dbpod-io/dbpod/cmd.Commit={{ .FullCommit }}
+      # .Tag keeps the v prefix (v0.1.0); .Version would strip it
+      - -s -w -X github.com/dbpod-io/dbpod/cmd.Version={{ .Tag }} -X github.com/dbpod-io/dbpod/cmd.Commit={{ .FullCommit }}
 
 archives:
   - id: dbpod
