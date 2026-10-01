@@ -12,6 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -206,6 +209,11 @@ func (CopyFetcher) Fetch(_ context.Context, u *url.URL, dest string) (Result, er
 	}
 	if src == "" {
 		src = u.Opaque
+	}
+	// file:///C:/... on Windows: the leading slash is URL syntax, and the
+	// drive-letter path only opens without it
+	if runtime.GOOS == "windows" && strings.HasPrefix(src, "/") && filepath.VolumeName(src[1:]) != "" {
+		src = src[1:]
 	}
 	in, err := os.Open(src)
 	if err != nil {

@@ -66,7 +66,12 @@ func pidAlive(pid int) bool {
 	}
 	statuses, err := p.Status()
 	if err != nil {
-		// exists but status unavailable — fall back to signal 0
+		// status unavailable (Windows: not implemented; signal 0 is not
+		// supported there either) — ask the OS whether the pid exists
+		running, rerr := p.IsRunning()
+		if rerr == nil {
+			return running
+		}
 		return p.SendSignal(syscall.Signal(0)) == nil
 	}
 	for _, st := range statuses {
@@ -213,11 +218,12 @@ func Stop(name string, stdout io.Writer) (*Record, error) {
 	fmt.Fprintf(stdout, "stopping %q (pid %d)\n", name, r.PID)
 
 	monitorAlive := r.MonitorPID > 0 && r.MonitorPID != os.Getpid() && pidAlive(r.MonitorPID)
-	if monitorAlive {
+	if monitorAlive && killPID(r.MonitorPID) == nil {
 		// TERM the monitor: it performs the graceful shutdown and updates
 		// the record. We wait for the SERVER to exit — if it survives
 		// (e.g. an older monitor without escalation) we kill it ourselves.
-		_ = killPID(r.MonitorPID)
+		// When TERM cannot be delivered (Windows supports only Kill) the
+		// direct graceful shutdown below takes over immediately.
 		if err := waitExit(r.PID, 35*time.Second); err == nil {
 			r2, lerr := load(name)
 			if errors.Is(lerr, os.ErrNotExist) { // auto-remove cleanup already ran

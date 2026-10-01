@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/dbpod-io/dbpod/internal/external"
 	"github.com/dbpod-io/dbpod/internal/globalconfig"
@@ -10,8 +11,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version is the dbpod release version.
-const Version = "0.1.0"
+// Version is the dbpod release version, injectable at build time:
+//
+//	go build -ldflags "-X github.com/dbpod-io/dbpod/cmd.Version=v0.1.0"
+var Version = "dev"
+
+// Commit is the git commit the binary was built from, injectable the same
+// way as Version ("none" when built from a plain checkout).
+var Commit = "none"
 
 var rootCmd = &cobra.Command{
 	Use:   "dbpod",
@@ -25,6 +32,24 @@ project-local volumes under ./.dbpod/.
 A dbpod.yaml in the project root lets you reproduce the exact database
 environment with one command.`,
 	SilenceUsage: true,
+}
+
+// versionText renders the shared version output of `dbpod version` and
+// `dbpod --version`.
+func versionText() string {
+	line := "dbpod version " + Version
+	if Commit != "none" {
+		line += " (commit " + Commit + ")"
+	}
+	return line + "\n" + runtime.Version() + " " + runtime.GOOS + "/" + runtime.GOARCH + "\n"
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print the dbpod version",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Fprint(os.Stdout, versionText())
+	},
 }
 
 func Execute() {
@@ -49,4 +74,11 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func init() {
+	rootCmd.AddCommand(versionCmd)
+	// --version prints the same text as the version subcommand
+	rootCmd.Version = versionText()
+	rootCmd.SetVersionTemplate("{{ .Version }}")
 }

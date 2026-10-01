@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -26,12 +27,17 @@ func mustStartAuto(t *testing.T, name string, autoRemove bool) *Record {
 	return r
 }
 
-// killServer TERMs the fake mysqld (simulating an external stop or crash)
-// and waits until the process is gone.
+// killServer stops the fake mysqld (simulating an external stop or crash)
+// and waits until the process is gone. Unix TERMs it; Windows has no
+// signals, so the simulation is a hard kill there.
 func killServer(t *testing.T, r *Record) {
 	t.Helper()
-	if err := killPID(r.PID); err != nil {
-		t.Fatalf("term server: %v", err)
+	kill := killPID
+	if runtime.GOOS == "windows" {
+		kill = forceKillPID
+	}
+	if err := kill(r.PID); err != nil {
+		t.Fatalf("kill server: %v", err)
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -96,8 +102,12 @@ func TestMonitorUpdatesRecordOnServerExit(t *testing.T) {
 	if r2.PID != 0 {
 		t.Errorf("record pid = %d, want 0", r2.PID)
 	}
-	if r2.LastExitCode != 0 {
-		t.Errorf("last exit code = %d, want 0", r2.LastExitCode)
+	wantExit := 0
+	if runtime.GOOS == "windows" {
+		wantExit = 1 // the simulation is a hard kill there
+	}
+	if r2.LastExitCode != wantExit {
+		t.Errorf("last exit code = %d, want %d", r2.LastExitCode, wantExit)
 	}
 	if _, err := os.Stat(r2.DataDir); err != nil {
 		t.Errorf("datadir should survive without --rm: %v", err)

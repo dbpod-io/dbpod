@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -150,7 +151,7 @@ func (e *Engine) templateContext(opts engine.Options) pongo2.Context {
 	if bind == "" {
 		bind = "127.0.0.1"
 	}
-	return pongo2.Context{
+	ctx := pongo2.Context{
 		"basedir":         filepath.Dir(opts.BinDir), // distribution root (bin/ lives inside)
 		"datadir":         filepath.Join(root, "data"),
 		"data_root":       root,
@@ -168,6 +169,14 @@ func (e *Engine) templateContext(opts engine.Options) pongo2.Context {
 		"bind_address":    bind,
 		"host":            engine.ConnectHost(bind),
 	}
+	// option files treat backslash as an escape prefix (\t → TAB, \r → CR),
+	// so Windows paths must go in with forward slashes — accepted everywhere.
+	for k, v := range ctx {
+		if s, ok := v.(string); ok {
+			ctx[k] = filepath.ToSlash(s)
+		}
+	}
+	return ctx
 }
 
 // renderCommand turns a command template into argv: tokenize (a
@@ -375,6 +384,9 @@ func (e *Engine) Env(opts engine.Options) []string { return nil }
 
 func engineBinary(opts engine.Options, name string) (string, error) {
 	p := filepath.Join(opts.BinDir, name)
+	if runtime.GOOS == "windows" && filepath.Ext(p) == "" {
+		p += ".exe" // Windows binaries carry the .exe suffix
+	}
 	if _, err := os.Stat(p); err != nil {
 		return "", fmt.Errorf("%s not found in %s (engine not installed?)", name, opts.BinDir)
 	}

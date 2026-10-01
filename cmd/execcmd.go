@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/dbpod-io/dbpod/internal/dist"
@@ -80,9 +81,10 @@ func runInstanceExec(engName, version string, port int, bind, dataDir string, re
 	}
 	if binary == "" {
 		_, binary, _ = eng.BinaryNames()
-		if dataDir != "" { // instance target: pre-wire root connection
-			rest = append(eng.ClientArgs(engine.Options{DataDir: dataDir, Port: port, BindAddress: bind}), rest...)
-		}
+	}
+	if _, client, _ := eng.BinaryNames(); dataDir != "" && binary == client {
+		// instance target running the client: pre-wire root connection
+		rest = append(eng.ClientArgs(engine.Options{DataDir: dataDir, Port: port, BindAddress: bind}), rest...)
 	}
 
 	binPath, err := resolveExecBinary(base, eng.ExecPaths(), binary)
@@ -129,6 +131,18 @@ func resolveExecTarget(id string) (engName, version string, port int, bind, data
 	return "", "", 0, "", "", fmt.Errorf("%q is neither an installed engine (e.g. mysql@8.0.46) nor a known instance (see `dbpod ps`)", id)
 }
 
+// statBin stats a binary path, appending the Windows .exe suffix when the
+// bare path has no extension (distributions ship mysqld.exe, mysql.exe, ...).
+func statBin(p string) (os.FileInfo, bool) {
+	if runtime.GOOS == "windows" && filepath.Ext(p) == "" {
+		if fi, err := os.Stat(p + ".exe"); err == nil && !fi.IsDir() {
+			return fi, true
+		}
+	}
+	fi, err := os.Stat(p)
+	return fi, err == nil && !fi.IsDir()
+}
+
 // hasExecutable reports whether arg names an executable shipped with the
 // distribution: a "bin/xxx"-style path under the basedir, or a bare name in
 // one of the exec paths.
@@ -138,11 +152,11 @@ func hasExecutable(base string, execPaths []string, arg string) bool {
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(base, p)
 		}
-		fi, err := os.Stat(p)
-		return err == nil && !fi.IsDir()
+		_, ok := statBin(p)
+		return ok
 	}
 	for _, p := range execPaths {
-		if fi, err := os.Stat(filepath.Join(base, p, arg)); err == nil && !fi.IsDir() {
+		if _, ok := statBin(filepath.Join(base, p, arg)); ok {
 			return true
 		}
 	}
@@ -155,20 +169,23 @@ func hasExecutable(base string, execPaths []string, arg string) bool {
 func resolveExecBinary(base string, execPaths []string, binary string) (string, error) {
 	if strings.ContainsRune(binary, '/') {
 		if filepath.IsAbs(binary) {
-			if _, err := os.Stat(binary); err != nil {
+			if _, ok := statBin(binary); !ok {
 				return "", fmt.Errorf("binary %s not found", binary)
 			}
 			return binary, nil
 		}
 		p := filepath.Join(base, binary)
-		if _, err := os.Stat(p); err != nil {
+		if _, ok := statBin(p); !ok {
 			return "", fmt.Errorf("binary %s not found in %s", binary, base)
 		}
-		return binary, nil // relative to cmd.Dir (= basedir)
+		if runtime.GOOS == "windows" && filepath.Ext(binary) == "" {
+			binary += ".exe" // resolved relative to cmd.Dir (= basedir)
+		}
+		return binary, nil
 	}
 	for _, p := range execPaths {
 		cand := filepath.Join(base, p, binary)
-		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+		if _, ok := statBin(cand); ok {
 			return cand, nil
 		}
 	}

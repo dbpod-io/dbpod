@@ -403,7 +403,7 @@ func runRegistryAdd(src string, stdout io.Writer) error {
 	if m.IndexURL != "" && !strings.Contains(m.IndexURL, "://") {
 		var resolved string
 		if filepath.IsAbs(m.IndexURL) {
-			resolved = (&url.URL{Scheme: "file", Path: filepath.ToSlash(m.IndexURL)}).String()
+			resolved = fileURL(m.IndexURL)
 		} else {
 			var rerr error
 			if resolved, rerr = resolveRelativeIndexURL(src, m.IndexURL); rerr != nil {
@@ -541,9 +541,21 @@ func sourceURL(src string) string {
 		return src
 	}
 	if abs, err := filepath.Abs(src); err == nil {
-		return (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()
+		return fileURL(abs)
 	}
 	return src
+}
+
+// fileURL renders an absolute local path as a standard file:// URL. The
+// leading slash is required: without it a Windows drive letter (C:/...)
+// lands in the URL host position and the URL no longer resolves back to
+// the file.
+func fileURL(absPath string) string {
+	p := filepath.ToSlash(absPath)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
 // readManifestSource loads manifest bytes from a local path or URL.

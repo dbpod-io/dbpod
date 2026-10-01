@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,7 +139,13 @@ func TestRegistryAddResolvesRelativeIndexURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "file://" + filepath.ToSlash(filepath.Join(srcDir, "mariadb.json"))
+	// the frozen index URL is the standard file form (file:///C:/... on
+	// Windows, where file://C:/ would turn the drive into the host name)
+	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(srcDir, "mariadb.json"))}
+	if !strings.HasPrefix(u.Path, "/") {
+		u.Path = "/" + u.Path
+	}
+	want := u.String()
 	if !strings.Contains(string(data), want) {
 		t.Errorf("stored manifest missing %q:\n%s", want, data)
 	}
@@ -182,7 +189,13 @@ func TestRegistryAddIndexURLForms(t *testing.T) {
 			t.Errorf("abs path index should verify: %q", out.String())
 		}
 		data, _ := os.ReadFile(filepath.Join(projectHome(t), "engines.d", "mariadb.yaml"))
-		if !strings.Contains(string(data), "file://"+filepath.ToSlash(index)) {
+		// the frozen URL is the standard file form (file:///C:/... on
+		// Windows, where file://C:/ would turn the drive into the host name)
+		u := &url.URL{Scheme: "file", Path: filepath.ToSlash(index)}
+		if !strings.HasPrefix(u.Path, "/") {
+			u.Path = "/" + u.Path
+		}
+		if !strings.Contains(string(data), u.String()) {
 			t.Errorf("abs path not frozen to file URL:\n%s", data)
 		}
 	})

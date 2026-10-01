@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/dbpod-io/dbpod/internal/engine"
@@ -103,6 +104,58 @@ done
 exit 0
 `
 
+// fakeBinSrc is the Windows counterpart of the two scripts: one program,
+// the executable name selects the role (mysqld idles, mysqladmin kills it).
+const fakeBinSrc = `package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+func main() {
+	var pidFile string
+	for _, a := range os.Args[1:] {
+		if p, ok := strings.CutPrefix(a, "--pid-file="); ok {
+			pidFile = p
+		}
+	}
+	if strings.Contains(os.Args[0], "mysqladmin") {
+		if data, err := os.ReadFile(pidFile); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+				if p, err := os.FindProcess(pid); err == nil {
+					_ = p.Kill()
+				}
+			}
+		}
+		return
+	}
+	if pidFile != "" {
+		_ = os.WriteFile(pidFile, []byte(fmt.Sprint(os.Getpid())), 0o644)
+	}
+	time.Sleep(30 * time.Second)
+}
+`
+
+// buildFakeBins compiles the fake mysqld/mysqladmin executables into bin
+// (Windows cannot run the shell scripts).
+func buildFakeBins(t *testing.T, bin string) {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), "fakebin.go")
+	if err := os.WriteFile(src, []byte(fakeBinSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, out := range []string{"mysqld", "mysqladmin"} {
+		exe := filepath.Join(bin, out+".exe")
+		if b, err := exec.Command("go", "build", "-o", exe, src).CombinedOutput(); err != nil {
+			t.Fatalf("build fake %s: %v\n%s", out, err, b)
+		}
+	}
+}
+
 // fakeDist installs a fake engine distribution into a temp DBPOD_HOME.
 func fakeDist(t *testing.T, engineName, version string) {
 	t.Helper()
@@ -115,12 +168,16 @@ func fakeDist(t *testing.T, engineName, version string) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for name, body := range map[string]string{
-		"mysqld":     mysqldScript,
-		"mysqladmin": mysqladminScript,
-	} {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
-			t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		buildFakeBins(t, bin)
+	} else {
+		for name, body := range map[string]string{
+			"mysqld":     mysqldScript,
+			"mysqladmin": mysqladminScript,
+		} {
+			if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if err := os.WriteFile(filepath.Join(base, ".dbpod-root"), []byte(".\n"), 0o644); err != nil {

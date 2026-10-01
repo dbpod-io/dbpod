@@ -1,0 +1,46 @@
+# Goreleaser configuration for dbpod release artifacts.
+#
+# Contract: every release ships exactly these assets
+#   dbpod-darwin-amd64.tar.gz   dbpod-darwin-arm64.tar.gz
+#   dbpod-linux-amd64.tar.gz    dbpod-linux-arm64.tar.gz
+#   dbpod-windows-amd64.zip     dbpod-windows-arm64.zip
+#   checksums.txt
+# each archive containing the bare binary (dbpod / dbpod.exe) at its root.
+version: 2
+
+project_name: dbpod
+
+builds:
+  - id: dbpod
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+        # .Tag keeps the v prefix (v0.1.0); .Version would strip it
+        -X github.com/dbpod-io/dbpod/cmd.Version={{ .Tag }}
+        -X github.com/dbpod-io/dbpod/cmd.Commit={{ .FullCommit }}
+
+archives:
+  - id: dbpod
+    formats: ["tar.gz"]
+    name_template: "dbpod-{{ .Os }}-{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+    # the bare binary only — no extra files inside the archives
+    files:
+      - none*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# no brew/scoop/homebrew taps for now — plain binary releases

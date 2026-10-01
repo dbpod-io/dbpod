@@ -23,7 +23,9 @@ func TestRenderCommandValueSafety(t *testing.T) {
 	if len(argv) != 2 {
 		t.Fatalf("argv = %q", argv)
 	}
-	if argv[1] != "--defaults-file="+filepath.Join(spacyDir, "my.cnf") {
+	// config paths are rendered with forward slashes (option files treat
+	// backslash as an escape prefix); the spaced path stays ONE token
+	if argv[1] != "--defaults-file="+filepath.ToSlash(filepath.Join(spacyDir, "my.cnf")) {
 		t.Errorf("config token = %q, want the spaced path as ONE argv element", argv[1])
 	}
 

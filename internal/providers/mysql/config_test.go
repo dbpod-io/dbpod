@@ -33,10 +33,12 @@ func TestWriteConfigRendersTemplate(t *testing.T) {
 	cfg := string(data)
 	for _, want := range []string{
 		"port                              = 3307",
-		"basedir                           = " + filepath.Dir(opts.BinDir),
-		"datadir                           = " + filepath.Join(root, "data"),
-		"socket                            = " + e.socketPath(opts), // may be the hashed temp path
-		"tmpdir                            = " + filepath.Join(root, "tmp"),
+		// the template renders paths with forward slashes (option files
+		// treat backslash as an escape prefix)
+		"basedir                           = " + filepath.ToSlash(filepath.Dir(opts.BinDir)),
+		"datadir                           = " + filepath.ToSlash(filepath.Join(root, "data")),
+		"socket                            = " + filepath.ToSlash(e.socketPath(opts)), // may be the hashed temp path
+		"tmpdir                            = " + filepath.ToSlash(filepath.Join(root, "tmp")),
 		"server-id                         = 3307",
 		"gtid_mode                         = on",
 	} {

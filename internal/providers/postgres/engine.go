@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/dbpod-io/dbpod/internal/dist"
@@ -175,6 +176,9 @@ func (e Provider) ExecArgs(opts engine.Options, inlineSQL string) []string {
 
 func (e Provider) binary(opts engine.Options, name string) (string, error) {
 	p := filepath.Join(opts.BinDir, name)
+	if runtime.GOOS == "windows" && filepath.Ext(p) == "" {
+		p += ".exe" // Windows binaries carry the .exe suffix
+	}
 	if _, err := os.Stat(p); err != nil {
 		return "", fmt.Errorf("%s not found in %s (engine not installed?)", name, opts.BinDir)
 	}
