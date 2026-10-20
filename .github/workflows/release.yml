@@ -13,6 +13,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # R2_* secrets live in the "release" environment
+    environment: release
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,3 +31,26 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Mirror the release assets to a Cloudflare R2 bucket (S3-compatible
+      # API). Layout: <bucket>/<tag>/... (immutable) and <bucket>/latest/... (rolling).
+      - name: Upload release artifacts to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # versioned copy: content for a tag never changes -> cache forever
+          aws s3 sync dist/ "s3://${R2_BUCKET}/${TAG}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --exclude "*" --include "*.tar.gz" --include "*.zip" --include "checksums.txt" \
+            --cache-control "public, max-age=31536000, immutable"
+          # rolling copy for install scripts -> short cache, exact mirror (--delete)
+          aws s3 sync dist/ "s3://${R2_BUCKET}/latest/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --exclude "*" --include "*.tar.gz" --include "*.zip" --include "checksums.txt" \
+            --cache-control "public, max-age=300" \
+            --delete
